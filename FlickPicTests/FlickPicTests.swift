@@ -1094,7 +1094,7 @@ struct ClassificationCoordinatorTests {
         }
 
         #expect(coordinator.isIndexing)
-        await coordinator.suspendForPhotoLibraryChange()
+        coordinator.suspendForPhotoLibraryChange()
         let pausedCount = try repository.classificationSnapshots().count
 
         #expect(!coordinator.isIndexing)
@@ -1109,6 +1109,73 @@ struct ClassificationCoordinatorTests {
         }
 
         #expect(try repository.classificationSnapshots().count == assets.count)
+    }
+
+    @Test
+    func photoLibrarySuspensionDoesNotWaitForVisionCancellation() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let library = FakePhotoLibraryClient(
+            assets: [.fixture(id: "non-cooperative")]
+        )
+        let gate = CancellationIgnoringClassificationGate()
+        let classifier = CancellationIgnoringImageClassificationClient(gate: gate)
+        let coordinator = ClassificationCoordinator(
+            classifier: classifier
+        )
+
+        coordinator.startAutomaticIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<100 where !(await gate.isBlockingFirstCall) {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+
+        #expect(await gate.isBlockingFirstCall)
+        coordinator.suspendForPhotoLibraryChange()
+        #expect(!coordinator.isIndexing)
+
+        coordinator.resumeAfterPhotoLibraryChange()
+        await gate.releaseFirstCall()
+        for _ in 0..<100
+            where try repository.classificationSnapshots().count < 1 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+
+        #expect(try repository.classificationSnapshots().count == 1)
+        #expect(await gate.callCount == 2)
+    }
+
+    @Test
+    func ordinaryCancellationDropsAQueuedAutomaticRestart() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let library = FakePhotoLibraryClient(
+            assets: [.fixture(id: "backgrounded")]
+        )
+        let gate = CancellationIgnoringClassificationGate()
+        let classifier = CancellationIgnoringImageClassificationClient(gate: gate)
+        let coordinator = ClassificationCoordinator(classifier: classifier)
+
+        coordinator.startAutomaticIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<100 where !(await gate.isBlockingFirstCall) {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+
+        coordinator.startAutomaticIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        coordinator.cancelCurrentWork()
+        await gate.releaseFirstCall()
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(await gate.callCount == 1)
+        #expect(try repository.classificationSnapshots().isEmpty)
     }
 
     @Test

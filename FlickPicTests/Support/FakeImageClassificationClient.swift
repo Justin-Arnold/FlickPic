@@ -17,6 +17,42 @@ actor ClassificationProbe {
     }
 }
 
+actor CancellationIgnoringClassificationGate {
+    private var firstCallContinuation: CheckedContinuation<Void, Never>?
+    private(set) var callCount = 0
+
+    var isBlockingFirstCall: Bool {
+        firstCallContinuation != nil
+    }
+
+    func blockFirstCall() async {
+        callCount += 1
+        guard callCount == 1 else { return }
+
+        await withCheckedContinuation { continuation in
+            firstCallContinuation = continuation
+        }
+    }
+
+    func releaseFirstCall() {
+        firstCallContinuation?.resume()
+        firstCallContinuation = nil
+    }
+}
+
+struct CancellationIgnoringImageClassificationClient: ImageClassificationClient {
+    let classifierVersion = 1
+    let gate: CancellationIgnoringClassificationGate
+
+    func classify(imageData: Data) async throws -> ImageClassificationResult {
+        await gate.blockFirstCall()
+        return ImageClassificationResult(
+            tags: [],
+            classifierVersion: classifierVersion
+        )
+    }
+}
+
 struct FakeImageClassificationClient: ImageClassificationClient {
     let classifierVersion: Int
     let results: [String: ImageClassificationResult]

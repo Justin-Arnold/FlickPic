@@ -206,7 +206,7 @@ struct PendingDeletionView: View {
         isDeleting = true
 
         Task {
-            await classificationCoordinator.suspendForPhotoLibraryChange()
+            classificationCoordinator.suspendForPhotoLibraryChange()
             defer {
                 classificationCoordinator.resumeAfterPhotoLibraryChange()
             }

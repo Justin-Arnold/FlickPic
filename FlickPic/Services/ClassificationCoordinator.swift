@@ -159,13 +159,11 @@ final class ClassificationCoordinator {
         workTask = task
 
         Task { @MainActor [weak self] in
-            let outcome = await task.value
+            _ = await task.value
             guard let self, self.workID == workID else { return }
             self.workTask = nil
             self.workID = nil
-            if !outcome.wasCanceled {
-                self.restartQueuedAutomaticIndexing()
-            }
+            self.restartQueuedAutomaticIndexing()
         }
     }
 
@@ -231,21 +229,26 @@ final class ClassificationCoordinator {
     }
 
     func cancelCurrentWork() {
+        automaticRescanRequested = false
         workTask?.cancel()
         isIndexing = false
     }
 
-    func suspendForPhotoLibraryChange() async {
+    func suspendForPhotoLibraryChange() {
         guard !isSuspendedForPhotoLibraryChange else { return }
         isSuspendedForPhotoLibraryChange = true
         automaticRescanRequested = false
-        await stopCurrentWork()
+        cancelCurrentWork()
     }
 
     func resumeAfterPhotoLibraryChange() {
         guard isSuspendedForPhotoLibraryChange else { return }
         isSuspendedForPhotoLibraryChange = false
-        restartAutomaticIndexingIfPossible()
+        if workTask == nil {
+            restartAutomaticIndexingIfPossible()
+        } else {
+            automaticRescanRequested = true
+        }
     }
 
     func setReviewActive(_ active: Bool) {
