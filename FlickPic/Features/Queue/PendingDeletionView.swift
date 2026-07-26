@@ -7,6 +7,7 @@ struct PendingDeletionView: View {
     @Query(sort: \PendingDeletion.queuedAt) private var pendingItems: [PendingDeletion]
 
     let photoLibrary: PhotoLibraryService
+    let classificationCoordinator: ClassificationCoordinator
 
     @State private var descriptors: [MediaAssetDescriptor] = []
     @State private var selectedAsset: MediaAssetDescriptor?
@@ -205,6 +206,11 @@ struct PendingDeletionView: View {
         isDeleting = true
 
         Task {
+            await classificationCoordinator.suspendForPhotoLibraryChange()
+            defer {
+                classificationCoordinator.resumeAfterPhotoLibraryChange()
+            }
+
             do {
                 let deleted = try await photoLibrary.deleteAssets(
                     identifiers: identifiers

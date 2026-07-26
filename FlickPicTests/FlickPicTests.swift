@@ -1072,6 +1072,46 @@ struct ClassificationCoordinatorTests {
     }
 
     @Test
+    func photoLibraryChangesSuspendAndResumeAutomaticIndexing() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let assets = (0..<40).map {
+            MediaAssetDescriptor.fixture(id: "mutation-\($0)")
+        }
+        let library = FakePhotoLibraryClient(assets: assets)
+        let coordinator = ClassificationCoordinator(
+            classifier: FakeImageClassificationClient(
+                delay: .milliseconds(20)
+            )
+        )
+
+        coordinator.startAutomaticIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<100 where !coordinator.isIndexing {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+
+        #expect(coordinator.isIndexing)
+        await coordinator.suspendForPhotoLibraryChange()
+        let pausedCount = try repository.classificationSnapshots().count
+
+        #expect(!coordinator.isIndexing)
+        #expect(pausedCount < assets.count)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(try repository.classificationSnapshots().count == pausedCount)
+
+        coordinator.resumeAfterPhotoLibraryChange()
+        for _ in 0..<200
+            where try repository.classificationSnapshots().count < assets.count {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(try repository.classificationSnapshots().count == assets.count)
+    }
+
+    @Test
     func failedItemsStayUnknownUntilRetried() async throws {
         let container = try makeContainer()
         let repository = ReviewRepository(modelContext: container.mainContext)

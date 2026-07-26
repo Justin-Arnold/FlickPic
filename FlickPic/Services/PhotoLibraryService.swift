@@ -487,12 +487,15 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
     }
 
     func deleteAssets(identifiers: [String]) async throws -> Set<String> {
+        guard !identifiers.isEmpty else { return [] }
+        try await waitForAppAlertToDismiss()
+
         if let overrideClient {
             return try await overrideClient.deleteAssets(
                 identifiers: identifiers
             )
         }
-        guard !identifiers.isEmpty else { return [] }
+
         let request = PhotoDeletionRequest(identifiers: identifiers)
         guard !request.resolvedIdentifiers.isEmpty else { return [] }
         try await PHPhotoLibrary.shared().performChanges {
@@ -562,6 +565,13 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
             throw PhotoLibraryError.assetUnavailable
         }
         return asset
+    }
+
+    private func waitForAppAlertToDismiss() async throws {
+        while Self.topViewController() is UIAlertController {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        await Task.yield()
     }
 
     private func beginObservingLibraryIfNeeded() {

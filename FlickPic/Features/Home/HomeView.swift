@@ -70,7 +70,10 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingQueue) {
                 NavigationStack {
-                    PendingDeletionView(photoLibrary: photoLibrary)
+                    PendingDeletionView(
+                        photoLibrary: photoLibrary,
+                        classificationCoordinator: classificationCoordinator
+                    )
                 }
             }
             .sheet(isPresented: $showingSettings) {

@@ -36,6 +36,7 @@ final class ClassificationCoordinator {
     private var currentRepository: ReviewRepository?
     private weak var currentPhotoLibrary: (any PhotoLibraryClient)?
     private var automaticRescanRequested = false
+    private var isSuspendedForPhotoLibraryChange = false
     private var lowPowerObserver: NSObjectProtocol?
     private var thermalObserver: NSObjectProtocol?
     private var updateContinuations:
@@ -128,7 +129,8 @@ final class ClassificationCoordinator {
         currentRepository = repository
         currentPhotoLibrary = photoLibrary
 
-        guard photoLibrary.authorizationState.canReadLibrary,
+        guard !isSuspendedForPhotoLibraryChange,
+              photoLibrary.authorizationState.canReadLibrary,
               !isSystemConstrained else {
             return
         }
@@ -231,6 +233,19 @@ final class ClassificationCoordinator {
     func cancelCurrentWork() {
         workTask?.cancel()
         isIndexing = false
+    }
+
+    func suspendForPhotoLibraryChange() async {
+        guard !isSuspendedForPhotoLibraryChange else { return }
+        isSuspendedForPhotoLibraryChange = true
+        automaticRescanRequested = false
+        await stopCurrentWork()
+    }
+
+    func resumeAfterPhotoLibraryChange() {
+        guard isSuspendedForPhotoLibraryChange else { return }
+        isSuspendedForPhotoLibraryChange = false
+        restartAutomaticIndexingIfPossible()
     }
 
     func setReviewActive(_ active: Bool) {
