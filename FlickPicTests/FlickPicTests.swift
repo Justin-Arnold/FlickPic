@@ -1,8 +1,26 @@
 import Foundation
+@preconcurrency import Photos
 import SwiftData
 import Testing
 import UIKit
 @testable import FlickPic
+
+struct PhotoLibraryErrorTests {
+    @Test
+    func networkRequiredErrorsUseAnActionableICloudMessage() {
+        let photoKitError = NSError(
+            domain: PHPhotosErrorDomain,
+            code: PHPhotosError.Code.networkAccessRequired.rawValue
+        )
+
+        let mapped = PhotoLibraryService.userFacingAssetLoadError(photoKitError)
+
+        #expect(
+            mapped.localizedDescription
+                == "This item needs to download from iCloud. Check your connection and try again."
+        )
+    }
+}
 
 @MainActor
 struct ReviewRepositoryTests {

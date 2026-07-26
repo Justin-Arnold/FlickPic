@@ -137,25 +137,43 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
 
         let asset = try asset(identifier: identifier)
         let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
+        options.deliveryMode = .fastFormat
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
 
-        let image: UIImage = try await withCheckedThrowingContinuation { continuation in
-            imageManager.requestImage(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFit,
-                options: options
-            ) { image, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
-                } else if (info?[PHImageCancelledKey] as? Bool) == true {
-                    continuation.resume(throwing: CancellationError())
-                } else if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: PhotoLibraryError.imageUnavailable)
+        let cancellation = PhotoRequestCancellation()
+        let image: UIImage = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let requestID = imageManager.requestImage(
+                    for: asset,
+                    targetSize: targetSize,
+                    contentMode: .aspectFit,
+                    options: options
+                ) { image, info in
+                    guard cancellation.claimCompletion() else { return }
+                    if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(
+                            throwing: Self.userFacingAssetLoadError(error)
+                        )
+                    } else if (info?[PHImageCancelledKey] as? Bool) == true {
+                        continuation.resume(throwing: CancellationError())
+                    } else if let image {
+                        continuation.resume(returning: image)
+                    } else {
+                        continuation.resume(
+                            throwing: PhotoLibraryError.imageUnavailable
+                        )
+                    }
+                }
+                cancellation.set(requestID)
+                if Task.isCancelled {
+                    imageManager.cancelImageRequest(requestID)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                if let requestID = cancellation.requestID {
+                    self?.imageManager.cancelImageRequest(requestID)
                 }
             }
         }
@@ -334,16 +352,37 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
         options.deliveryMode = .automatic
         options.isNetworkAccessAllowed = true
 
-        return try await withCheckedThrowingContinuation { continuation in
-            imageManager.requestPlayerItem(forVideo: asset, options: options) { item, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
-                } else if (info?[PHImageCancelledKey] as? Bool) == true {
-                    continuation.resume(throwing: CancellationError())
-                } else if let item {
-                    continuation.resume(returning: item)
-                } else {
-                    continuation.resume(throwing: PhotoLibraryError.imageUnavailable)
+        let cancellation = PhotoRequestCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let requestID = imageManager.requestPlayerItem(
+                    forVideo: asset,
+                    options: options
+                ) { item, info in
+                    guard cancellation.claimCompletion() else { return }
+                    if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(
+                            throwing: Self.userFacingAssetLoadError(error)
+                        )
+                    } else if (info?[PHImageCancelledKey] as? Bool) == true {
+                        continuation.resume(throwing: CancellationError())
+                    } else if let item {
+                        continuation.resume(returning: item)
+                    } else {
+                        continuation.resume(
+                            throwing: PhotoLibraryError.imageUnavailable
+                        )
+                    }
+                }
+                cancellation.set(requestID)
+                if Task.isCancelled {
+                    imageManager.cancelImageRequest(requestID)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                if let requestID = cancellation.requestID {
+                    self?.imageManager.cancelImageRequest(requestID)
                 }
             }
         }
@@ -544,11 +583,15 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
         result.enumerateObjects { asset, _, _ in assets.append(asset) }
         cachedAssets = assets
 
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
         imageManager.startCachingImages(
             for: assets,
             targetSize: targetSize,
             contentMode: .aspectFit,
-            options: nil
+            options: options
         )
     }
 
@@ -589,6 +632,16 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
             throw PhotoLibraryError.assetUnavailable
         }
         return asset
+    }
+
+    nonisolated static func userFacingAssetLoadError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        guard nsError.domain == PHPhotosErrorDomain,
+              nsError.code
+                == PHPhotosError.Code.networkAccessRequired.rawValue else {
+            return error
+        }
+        return PhotoLibraryError.iCloudDownloadRequired
     }
 
     private func waitForAppAlertToDismiss() async throws {

@@ -133,7 +133,15 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         identifier: String,
         targetSize: CGSize
     ) async throws -> UIImage {
-        try fixtureImage(identifier: identifier, targetSize: targetSize)
+        if ProcessInfo.processInfo.arguments.contains(
+            "-ui-testing-cloud-video-thumbnail"
+        ), identifier == "ui-video-1" {
+            throw PhotoLibraryError.iCloudDownloadRequired
+        }
+        return try fixtureImage(
+            identifier: identifier,
+            targetSize: targetSize
+        )
     }
 
     func inspectionImage(

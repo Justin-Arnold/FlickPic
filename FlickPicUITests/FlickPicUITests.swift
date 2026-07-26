@@ -88,6 +88,37 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
+    func testCloudVideoShowsAnActionableRetryMessage() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures",
+            "-ui-testing-cloud-video-thumbnail"
+        ]
+        app.launch()
+
+        let videos = app.buttons["category-metadata:videos"]
+        XCTAssertTrue(videos.waitForExistence(timeout: 3))
+        videos.tap()
+
+        XCTAssertTrue(
+            app.staticTexts[
+                "This item needs to download from iCloud. Check your connection and try again."
+            ]
+            .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["Retry"].exists)
+        XCTAssertTrue(app.buttons["Later"].exists)
+        XCTAssertFalse(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS 'PHPhotosErrorDomain'"))
+                .firstMatch
+                .exists
+        )
+    }
+
+    @MainActor
     func testVisionBucketOpensWhileAnotherMatchIsStillArriving() throws {
         let app = XCUIApplication()
         app.launchArguments += [
