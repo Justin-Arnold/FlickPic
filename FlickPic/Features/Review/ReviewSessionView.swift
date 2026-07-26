@@ -242,24 +242,32 @@ struct ReviewSessionView: View {
 
     @ViewBuilder
     private var decisionOverlay: some View {
-        let horizontalStrength = min(abs(cardOffset.width) / 160, 1)
-        let upwardStrength = min(max(-cardOffset.height, 0) / 160, 1)
+        let horizontalStrength = min(
+            abs(cardOffset.width)
+                / ReviewCardGesturePolicy.fullOverlayDistance,
+            1
+        )
+        let upwardStrength = min(
+            max(-cardOffset.height, 0)
+                / ReviewCardGesturePolicy.fullOverlayDistance,
+            1
+        )
 
-        if cardOffset.width < -20 {
+        if cardOffset.width < -ReviewCardGesturePolicy.overlayThreshold {
             DecisionOverlay(
                 title: "Queue Delete",
                 systemImage: "trash",
                 color: .red,
                 opacity: horizontalStrength
             )
-        } else if cardOffset.width > 20 {
+        } else if cardOffset.width > ReviewCardGesturePolicy.overlayThreshold {
             DecisionOverlay(
                 title: "Keep",
                 systemImage: "checkmark",
                 color: .green,
                 opacity: horizontalStrength
             )
-        } else if cardOffset.height < -20 {
+        } else if cardOffset.height < -ReviewCardGesturePolicy.overlayThreshold {
             DecisionOverlay(
                 title: "Rescue",
                 systemImage: "arrow.up.doc",
@@ -270,26 +278,27 @@ struct ReviewSessionView: View {
     }
 
     private var cardGesture: some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: ReviewCardGesturePolicy.minimumDistance)
             .onChanged { value in
                 guard decisionAssetID == nil else { return }
-                let translation = value.translation
-                if abs(translation.width) > abs(translation.height) {
-                    cardOffset = CGSize(width: translation.width, height: 0)
-                } else if translation.height < 0 {
-                    cardOffset = CGSize(width: 0, height: translation.height)
+                if let constrainedOffset =
+                    ReviewCardGesturePolicy.constrainedOffset(
+                        for: value.translation
+                    ) {
+                    cardOffset = constrainedOffset
                 }
             }
             .onEnded { _ in
                 guard decisionAssetID == nil else { return }
-                if cardOffset.width <= -110 {
+                switch ReviewCardGesturePolicy.action(for: cardOffset) {
+                case .queueDelete:
                     performDecision(.delete)
-                } else if cardOffset.width >= 110 {
+                case .keep:
                     performDecision(.keep)
-                } else if cardOffset.height <= -110 {
+                case .rescue:
                     resetCard()
                     showingRescueActions = true
-                } else {
+                case nil:
                     resetCard()
                 }
             }

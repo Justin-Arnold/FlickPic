@@ -33,8 +33,134 @@ final class FlickPicUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Deletion stays deliberate"].exists)
         XCTAssertTrue(app.staticTexts["Private categorization"].exists)
         XCTAssertTrue(app.staticTexts["No account or tracking"].exists)
-        XCTAssertTrue(app.buttons["Continue"].exists)
-        XCTAssertEqual(app.alerts.count, 0, "Photos access must not be requested before Continue")
+        XCTAssertTrue(app.buttons["See How It Works"].exists)
+        XCTAssertEqual(
+            app.alerts.count,
+            0,
+            "Photos access must not be requested before the tour."
+        )
+
+        app.buttons["onboarding-start"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-queue-delete"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertEqual(
+            app.alerts.count,
+            0,
+            "Opening the tour must not request Photos access."
+        )
+    }
+
+    @MainActor
+    func testOnboardingPracticesEveryCoreReviewGesture() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let start = app.buttons["onboarding-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let card = app.descendants(matching: .any)["onboarding-demo-card"]
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-queue-delete"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(card.waitForExistence(timeout: 3))
+        card.swipeLeft()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-keep"]
+                .waitForExistence(timeout: 3)
+        )
+        card.swipeRight()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-rescue"]
+                .waitForExistence(timeout: 3)
+        )
+        card.swipeUp()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-inspect"]
+                .waitForExistence(timeout: 3)
+        )
+        card.doubleTap()
+
+        let continueToPhotos = app.buttons["onboarding-continue"]
+        XCTAssertTrue(continueToPhotos.waitForExistence(timeout: 3))
+        continueToPhotos.tap()
+
+        XCTAssertTrue(
+            app.buttons["start-reviewing"].waitForExistence(timeout: 3)
+        )
+    }
+
+    @MainActor
+    func testOnboardingGestureTourCanBeSkipped() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let start = app.buttons["onboarding-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let skip = app.buttons["onboarding-skip"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 3))
+        skip.tap()
+
+        XCTAssertTrue(
+            app.buttons["start-reviewing"].waitForExistence(timeout: 3)
+        )
+    }
+
+    @MainActor
+    func testOnboardingCanAdvanceWithoutPerformingGestures() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let start = app.buttons["onboarding-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let next = app.buttons["onboarding-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 3))
+        next.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-keep"]
+                .waitForExistence(timeout: 3)
+        )
+
+        next.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-rescue"]
+                .waitForExistence(timeout: 3)
+        )
+
+        next.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-inspect"]
+                .waitForExistence(timeout: 3)
+        )
+
+        let continueToPhotos = app.buttons["onboarding-continue"]
+        XCTAssertTrue(continueToPhotos.waitForExistence(timeout: 3))
+        continueToPhotos.tap()
+        XCTAssertTrue(
+            app.buttons["start-reviewing"].waitForExistence(timeout: 3)
+        )
     }
 
     @MainActor

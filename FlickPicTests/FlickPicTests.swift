@@ -49,6 +49,66 @@ struct VisionCategoryDisplayPolicyTests {
 }
 
 @MainActor
+struct ReviewTutorialTests {
+    @Test
+    func tutorialKeepsTheCoreInteractionsOrderedAndUnique() {
+        let steps = ReviewTutorialStep.allCases
+
+        #expect(
+            steps.map { $0.id }
+                == ["queue-delete", "keep", "rescue", "inspect"]
+        )
+        #expect(Set(steps.map { $0.id }).count == steps.count)
+        #expect(
+            Set(
+                steps.compactMap { step -> ReviewCardGestureAction? in
+                    guard case let .drag(action) = step.interaction else {
+                        return nil
+                    }
+                    return action
+                }
+            ) == Set(ReviewCardGestureAction.allCases)
+        )
+    }
+
+    @Test
+    func sharedGesturePolicyUsesTheProductionDirectionsAndThreshold() {
+        #expect(
+            ReviewCardGesturePolicy.action(
+                for: CGSize(
+                    width: -ReviewCardGesturePolicy.activationThreshold,
+                    height: 0
+                )
+            ) == .queueDelete
+        )
+        #expect(
+            ReviewCardGesturePolicy.action(
+                for: CGSize(
+                    width: ReviewCardGesturePolicy.activationThreshold,
+                    height: 0
+                )
+            ) == .keep
+        )
+        #expect(
+            ReviewCardGesturePolicy.action(
+                for: CGSize(
+                    width: 0,
+                    height: -ReviewCardGesturePolicy.activationThreshold
+                )
+            ) == .rescue
+        )
+        #expect(
+            ReviewCardGesturePolicy.action(
+                for: CGSize(
+                    width: ReviewCardGesturePolicy.activationThreshold - 1,
+                    height: 0
+                )
+            ) == nil
+        )
+    }
+}
+
+@MainActor
 struct ReviewRepositoryTests {
     @Test
     func keepQueueUndoAndResetPreserveTheRightState() throws {

@@ -4,9 +4,39 @@ struct OnboardingView: View {
     let photoLibrary: PhotoLibraryService
     let onComplete: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var isShowingWalkthrough = false
     @State private var isRequestingAccess = false
 
     var body: some View {
+        ZStack {
+            if isShowingWalkthrough {
+                GestureWalkthroughView(onFinish: requestAccess)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                privacyIntroduction
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            if isRequestingAccess {
+                Color.black.opacity(0.72)
+                    .ignoresSafeArea()
+                ProgressView("Requesting Photos Access…")
+                    .tint(.white)
+                    .foregroundStyle(.white)
+                    .padding(20)
+                    .background(.regularMaterial, in: Capsule())
+                    .accessibilityIdentifier("onboarding-requesting-access")
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.28),
+            value: isShowingWalkthrough
+        )
+    }
+
+    private var privacyIntroduction: some View {
         ZStack {
             LinearGradient(
                 colors: [
@@ -67,24 +97,18 @@ struct OnboardingView: View {
                         Spacer()
 
                         Button {
-                            requestAccess()
+                            isShowingWalkthrough = true
                         } label: {
-                            HStack {
-                                if isRequestingAccess {
-                                    ProgressView()
-                                        .tint(.white)
-                                }
-                                Text("Continue")
-                                    .fontWeight(.semibold)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            Text("See How It Works")
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(isRequestingAccess)
+                        .accessibilityIdentifier("onboarding-start")
 
-                        Text("FlickPic will ask for read and write access so it can review your library and delete only items you later confirm. Private Vision categorization is optional.")
+                        Text("The quick tour uses a sample card and never touches your library. FlickPic asks for read and write access only after the tour.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -99,6 +123,7 @@ struct OnboardingView: View {
     }
 
     private func requestAccess() {
+        guard !isRequestingAccess else { return }
         isRequestingAccess = true
         Task {
             _ = await photoLibrary.requestAuthorization()
