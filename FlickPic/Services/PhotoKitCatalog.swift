@@ -38,15 +38,6 @@ actor PhotoKitCatalog {
             )
         }
 
-        if configuration.category == .screenshots {
-            predicates.append(
-                NSPredicate(
-                    format: "(mediaSubtype & %d) != 0",
-                    PHAssetMediaSubtype.photoScreenshot.rawValue
-                )
-            )
-        }
-
         if let range = configuration.normalizedDateRange {
             predicates.append(
                 NSPredicate(

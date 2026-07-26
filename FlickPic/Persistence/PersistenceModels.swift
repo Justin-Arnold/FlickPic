@@ -43,17 +43,19 @@ final class AppPreference {
     var customStart: Date
     var customEnd: Date
     var mediaFilterRawValue: String
-    var categoryRawValue: String = ContentCategoryFilter.any.rawValue
+    var categoryRawValue: String = "any"
     var orderRawValue: String
     var includeReviewed: Bool
     var includeFavorites: Bool
     var hapticsEnabled: Bool
+    var hasStartedCategorization: Bool = false
 
     init(
         key: String = "primary",
         hasCompletedOnboarding: Bool = false,
         configuration: ReviewConfiguration = ReviewConfiguration(),
-        hapticsEnabled: Bool = true
+        hapticsEnabled: Bool = true,
+        hasStartedCategorization: Bool = false
     ) {
         self.key = key
         self.hasCompletedOnboarding = hasCompletedOnboarding
@@ -62,11 +64,12 @@ final class AppPreference {
         self.customStart = configuration.customStart
         self.customEnd = configuration.customEnd
         self.mediaFilterRawValue = configuration.mediaFilter.rawValue
-        self.categoryRawValue = configuration.category.rawValue
+        self.categoryRawValue = "any"
         self.orderRawValue = configuration.order.rawValue
         self.includeReviewed = configuration.includeReviewed
         self.includeFavorites = configuration.includeFavorites
         self.hapticsEnabled = hapticsEnabled
+        self.hasStartedCategorization = hasStartedCategorization
     }
 
     var configuration: ReviewConfiguration {
@@ -80,9 +83,6 @@ final class AppPreference {
                 customStart: customStart,
                 customEnd: customEnd,
                 mediaFilter: MediaFilter(rawValue: mediaFilterRawValue) ?? .all,
-                category: isLegacyScreenshotScope
-                    ? .screenshots
-                    : ContentCategoryFilter(rawValue: categoryRawValue) ?? .any,
                 order: ReviewOrder(rawValue: orderRawValue) ?? .oldestFirst,
                 includeReviewed: includeReviewed,
                 includeFavorites: includeFavorites
@@ -94,22 +94,26 @@ final class AppPreference {
             customStart = newValue.customStart
             customEnd = newValue.customEnd
             mediaFilterRawValue = newValue.mediaFilter.rawValue
-            categoryRawValue = newValue.category.rawValue
+            categoryRawValue = "any"
             orderRawValue = newValue.order.rawValue
             includeReviewed = newValue.includeReviewed
             includeFavorites = newValue.includeFavorites
         }
     }
 
-    func migrateLegacyScreenshotConfiguration() -> Bool {
-        guard scopeRawValue == ReviewScopeKind.screenshots.rawValue else {
-            return false
+    func migrateLegacyCategoryConfiguration() -> Bool {
+        var changed = false
+        if scopeRawValue == ReviewScopeKind.screenshots.rawValue {
+            scopeRawValue = ReviewScopeKind.unreviewed.rawValue
+            mediaFilterRawValue = MediaFilter.photos.rawValue
+            includeReviewed = false
+            changed = true
         }
-        scopeRawValue = ReviewScopeKind.unreviewed.rawValue
-        categoryRawValue = ContentCategoryFilter.screenshots.rawValue
-        mediaFilterRawValue = MediaFilter.photos.rawValue
-        includeReviewed = false
-        return true
+        if categoryRawValue != "any" {
+            categoryRawValue = "any"
+            changed = true
+        }
+        return changed
     }
 }
 
@@ -123,15 +127,6 @@ final class AssetClassification {
     var statusRawValue: String
     var lastAttemptAt: Date
 
-    var category: ContentCategory? {
-        get {
-            categoryRawValue.flatMap(ContentCategory.init(rawValue:))
-        }
-        set {
-            categoryRawValue = newValue?.rawValue
-        }
-    }
-
     var status: ClassificationRecordStatus {
         get {
             ClassificationRecordStatus(rawValue: statusRawValue) ?? .failed
@@ -143,16 +138,14 @@ final class AssetClassification {
 
     init(
         assetIdentifier: String,
-        category: ContentCategory?,
-        confidence: Float,
         assetModificationDate: Date?,
         classifierVersion: Int,
         status: ClassificationRecordStatus,
         lastAttemptAt: Date = .now
     ) {
         self.assetIdentifier = assetIdentifier
-        self.categoryRawValue = category?.rawValue
-        self.confidence = confidence
+        self.categoryRawValue = nil
+        self.confidence = 0
         self.assetModificationDate = assetModificationDate
         self.classifierVersion = classifierVersion
         self.statusRawValue = status.rawValue
@@ -162,12 +155,45 @@ final class AssetClassification {
     var snapshot: ClassificationCacheSnapshot {
         ClassificationCacheSnapshot(
             assetIdentifier: assetIdentifier,
-            category: category,
-            confidence: confidence,
             assetModificationDate: assetModificationDate,
             classifierVersion: classifierVersion,
             status: status,
             lastAttemptAt: lastAttemptAt
         )
+    }
+}
+
+@Model
+final class VisionTagAssignment {
+    @Attribute(.unique) var assignmentKey: String
+    var assetIdentifier: String
+    var tagIdentifier: String
+    var confidence: Float
+    var classifierVersion: Int
+
+    init(
+        assetIdentifier: String,
+        tag: VisionTag,
+        classifierVersion: Int
+    ) {
+        self.assignmentKey = Self.key(
+            assetIdentifier: assetIdentifier,
+            tagIdentifier: tag.identifier
+        )
+        self.assetIdentifier = assetIdentifier
+        self.tagIdentifier = tag.identifier
+        self.confidence = tag.confidence
+        self.classifierVersion = classifierVersion
+    }
+
+    static func key(
+        assetIdentifier: String,
+        tagIdentifier: String
+    ) -> String {
+        "\(assetIdentifier)\u{1F}\(tagIdentifier)"
+    }
+
+    var tag: VisionTag {
+        VisionTag(identifier: tagIdentifier, confidence: confidence)
     }
 }

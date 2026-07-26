@@ -58,7 +58,6 @@ struct ReviewConfiguration: Equatable, Sendable {
     var customStart = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
     var customEnd = Date.now
     var mediaFilter: MediaFilter = .all
-    var category: ContentCategoryFilter = .any
     var order: ReviewOrder = .oldestFirst
     var includeReviewed = false
     var includeFavorites = false
@@ -77,11 +76,11 @@ struct ReviewConfiguration: Equatable, Sendable {
     }
 
     nonisolated var effectiveMediaFilter: MediaFilter {
-        category == .any ? mediaFilter : .photos
+        mediaFilter
     }
 
     var contentSummary: String {
-        category == .any ? effectiveMediaFilter.title : category.title
+        effectiveMediaFilter.title
     }
 
     nonisolated var normalizedDateRange: ClosedRange<Date>? {
@@ -105,18 +104,4 @@ struct ReviewConfiguration: Equatable, Sendable {
         }
     }
 
-    func matchesCategory(
-        asset: MediaAssetDescriptor,
-        indexedCategory: ContentCategory?
-    ) -> Bool {
-        switch category {
-        case .any:
-            return true
-        case .screenshots:
-            return asset.isScreenshot
-        case .receipts, .documents, .otherPhotos:
-            guard !asset.isScreenshot else { return false }
-            return indexedCategory == category.storedCategory
-        }
-    }
 }

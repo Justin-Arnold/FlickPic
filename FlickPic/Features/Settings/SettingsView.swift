@@ -75,7 +75,7 @@ struct SettingsView: View {
             } header: {
                 Text("On-Device Categories")
             } footer: {
-                Text("Apple Vision examines small previews locally. FlickPic stores only each item’s category and never stores OCR text or embeddings.")
+                Text("Apple Vision examines small previews locally. An item can have several category tags. FlickPic never stores OCR text or embeddings.")
             }
 
             Section {
@@ -154,7 +154,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Saved category results will be removed and rebuilt automatically. Your Photos library and review decisions will not change.")
+            Text("Saved Vision tags will be removed and rebuilt automatically. Metadata categories, your Photos library, and review decisions will not change.")
         }
         .alert(
             "Couldn’t Save Changes",

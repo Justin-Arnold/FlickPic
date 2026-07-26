@@ -47,19 +47,11 @@ struct SessionSetupView: View {
                         )
                     }
 
-                    Picker("Category", selection: $configuration.category) {
-                        ForEach(ContentCategoryFilter.allCases) { category in
-                            Text(category.title).tag(category)
-                        }
-                    }
-                    .accessibilityIdentifier("category-filter")
-
                     Picker("Media", selection: $configuration.mediaFilter) {
                         ForEach(MediaFilter.allCases) { filter in
                             Text(filter.title).tag(filter)
                         }
                     }
-                    .disabled(configuration.category != .any)
                     .accessibilityIdentifier("media-filter")
                 }
 
@@ -92,20 +84,12 @@ struct SessionSetupView: View {
             }
             .navigationTitle("Review Setup")
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: configuration.category) { _, category in
-                if category != .any {
-                    configuration.mediaFilter = .photos
-                }
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if configuration.category != .any {
-                            configuration.mediaFilter = .photos
-                        }
                         if configuration.scope == .unreviewed {
                             configuration.includeReviewed = false
                         }

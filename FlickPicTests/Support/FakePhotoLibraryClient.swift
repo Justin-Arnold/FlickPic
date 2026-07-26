@@ -56,10 +56,6 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
                     break
                 }
 
-                if configuration.category == .screenshots && !asset.isScreenshot {
-                    return false
-                }
-
                 if let dateRange {
                     guard let creationDate = asset.creationDate,
                           dateRange.contains(creationDate) else {
@@ -190,7 +186,13 @@ extension MediaAssetDescriptor {
         pixelHeight: Int = 1_600,
         favorite: Bool = false,
         screenshot: Bool = false,
-        livePhoto: Bool = false
+        livePhoto: Bool = false,
+        gif: Bool = false,
+        screenRecording: Bool = false,
+        panorama: Bool = false,
+        portrait: Bool = false,
+        slowMotion: Bool = false,
+        timeLapse: Bool = false
     ) -> MediaAssetDescriptor {
         MediaAssetDescriptor(
             id: id,
@@ -202,7 +204,13 @@ extension MediaAssetDescriptor {
             duration: kind == .video ? 12 : 0,
             isFavorite: favorite,
             isScreenshot: screenshot,
-            isLivePhoto: livePhoto
+            isLivePhoto: livePhoto,
+            isGIF: gif,
+            isScreenRecording: screenRecording,
+            isPanorama: panorama,
+            isPortrait: portrait,
+            isSlowMotion: slowMotion,
+            isTimeLapse: timeLapse
         )
     }
 }

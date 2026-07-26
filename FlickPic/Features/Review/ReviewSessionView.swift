@@ -5,6 +5,7 @@ struct ReviewSessionView: View {
 
     @Bindable var model: ReviewSessionModel
     let photoLibrary: PhotoLibraryService
+    let classificationCoordinator: ClassificationCoordinator
     let onEndSession: () -> Void
 
     @State private var cardOffset: CGSize = .zero
@@ -40,6 +41,35 @@ struct ReviewSessionView: View {
                         .foregroundStyle(.white)
                     } else if let asset = model.currentAsset {
                         reviewCard(asset)
+                    } else if model.isWaitingForMoreMatches {
+                        ContentUnavailableView {
+                            Label(
+                                "Waiting for More Matches",
+                                systemImage: "sparkles"
+                            )
+                        } description: {
+                            VStack(spacing: 10) {
+                                Text(
+                                    "You’ve reviewed every match found so far. New matches will appear here automatically."
+                                )
+                                if classificationCoordinator.totalCount > 0 {
+                                    ProgressView(
+                                        value: Double(
+                                            classificationCoordinator.completedCount
+                                        ),
+                                        total: Double(
+                                            classificationCoordinator.totalCount
+                                        )
+                                    )
+                                } else {
+                                    ProgressView()
+                                }
+                            }
+                        } actions: {
+                            Button("End Session", action: onEndSession)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .foregroundStyle(.white)
                     } else {
                         ContentUnavailableView {
                             Label("Nothing to Review", systemImage: "checkmark.circle")

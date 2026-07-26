@@ -21,7 +21,8 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
             duration: 0,
             isFavorite: false,
             isScreenshot: false,
-            isLivePhoto: false
+            isLivePhoto: false,
+            isGIF: true
         ),
         MediaAssetDescriptor(
             id: "ui-photo-2",
@@ -84,10 +85,6 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
                     break
                 }
 
-                if configuration.category == .screenshots && !asset.isScreenshot {
-                    return false
-                }
-
                 if let dateRange {
                     guard let creationDate = asset.creationDate,
                           dateRange.contains(creationDate) else {
@@ -113,7 +110,7 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
     }
 
     func classifiableAssets() async throws -> [MediaAssetDescriptor] {
-        []
+        assets.filter { $0.mediaKind == .photo }
     }
 
     func descriptors(for identifiers: [String]) async -> [MediaAssetDescriptor] {
@@ -170,7 +167,10 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         identifier: String,
         allowNetworkAccess: Bool
     ) async throws -> Data {
-        try await recognitionImageData(identifier: identifier)
+        guard assets.contains(where: { $0.id == identifier }) else {
+            throw PhotoLibraryError.assetUnavailable
+        }
+        return Data(identifier.utf8)
     }
 
     func exportCurrentMedia(identifier: String) async throws -> PreparedMediaExport {
@@ -295,5 +295,33 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         guard CGImageDestinationFinalize(destination) else { return nil }
         return data as Data
     }()
+}
+
+struct UITestImageClassificationClient: ImageClassificationClient {
+    let classifierVersion = ImageClassificationPolicy.classifierVersion
+
+    func classify(imageData: Data) async throws -> ImageClassificationResult {
+        let identifier = String(decoding: imageData, as: UTF8.self)
+        try await Task.sleep(
+            for: identifier == "ui-photo-1"
+                ? .milliseconds(150)
+                : .seconds(6)
+        )
+        let tags: [VisionTag] = switch identifier {
+        case "ui-photo-1":
+            [VisionTag(identifier: "dog", confidence: 0.97)]
+        case "ui-photo-2":
+            [
+                VisionTag(identifier: "dog", confidence: 0.95),
+                VisionTag(identifier: "document", confidence: 0.92)
+            ]
+        default:
+            []
+        }
+        return ImageClassificationResult(
+            tags: tags,
+            classifierVersion: classifierVersion
+        )
+    }
 }
 #endif

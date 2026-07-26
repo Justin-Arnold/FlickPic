@@ -14,13 +14,8 @@ struct VisionImageClassificationService: ImageClassificationClient {
         request.cropAndScaleAction = .scaleToFit
         let observations = try await request.perform(on: imageData)
 
-        let candidates: [ClassificationCandidate] = observations.compactMap {
-            (observation: ClassificationObservation) -> ClassificationCandidate? in
-            guard observation.identifier == "receipt"
-                    || observation.identifier == "document" else {
-                return nil
-            }
-
+        let candidates: [ClassificationCandidate] = observations.map {
+            (observation: ClassificationObservation) in
             let meetsHighPrecision = observation.hasPrecisionRecallCurve
                 ? observation.hasMinimumRecall(0.01, forPrecision: 0.90)
                 : observation.confidence >= 0.90
@@ -46,38 +41,38 @@ struct ClassificationCandidate: Equatable, Sendable {
 }
 
 enum ImageClassificationPolicy {
-    static let classifierVersion = 1
+    static let classifierVersion = 2
+    static let maximumTagsPerAsset = 5
 
     static func resolve(
         candidates: [ClassificationCandidate],
         classifierVersion: Int
     ) -> ImageClassificationResult {
-        if let receipt = candidates.first(where: {
-            $0.identifier == "receipt" && $0.meetsHighPrecision
-        }) {
-            return ImageClassificationResult(
-                category: .receipt,
-                confidence: receipt.confidence,
-                classifierVersion: classifierVersion
-            )
+        var strongestCandidates: [String: ClassificationCandidate] = [:]
+        for candidate in candidates where candidate.meetsHighPrecision {
+            if let existing = strongestCandidates[candidate.identifier],
+               existing.confidence >= candidate.confidence {
+                continue
+            }
+            strongestCandidates[candidate.identifier] = candidate
         }
 
-        if let document = candidates.first(where: {
-            $0.identifier == "document" && $0.meetsHighPrecision
-        }) {
-            return ImageClassificationResult(
-                category: .document,
-                confidence: document.confidence,
-                classifierVersion: classifierVersion
-            )
-        }
-
-        let strongestRelevantConfidence = candidates
-            .map(\.confidence)
-            .max() ?? 0
+        let tags = strongestCandidates.values
+            .sorted {
+                if $0.confidence != $1.confidence {
+                    return $0.confidence > $1.confidence
+                }
+                return $0.identifier < $1.identifier
+            }
+            .prefix(maximumTagsPerAsset)
+            .map {
+                VisionTag(
+                    identifier: $0.identifier,
+                    confidence: $0.confidence
+                )
+            }
         return ImageClassificationResult(
-            category: .otherPhoto,
-            confidence: max(0, 1 - strongestRelevantConfidence),
+            tags: tags,
             classifierVersion: classifierVersion
         )
     }

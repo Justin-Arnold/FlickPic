@@ -51,8 +51,7 @@ struct FakeImageClassificationClient: ImageClassificationClient {
                 throw FakeClassificationError.failed
             }
             let result = results[identifier] ?? ImageClassificationResult(
-                category: .otherPhoto,
-                confidence: 1,
+                tags: [],
                 classifierVersion: classifierVersion
             )
             await probe.end()

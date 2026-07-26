@@ -54,7 +54,7 @@ struct OnboardingView: View {
                             PrivacyPromiseRow(
                                 icon: "sparkles.rectangle.stack",
                                 title: "Private categorization",
-                                detail: "Apple Vision finds receipts and documents entirely on this iPhone."
+                                detail: "If you choose, Apple Vision discovers image categories entirely on this iPhone."
                             )
                             PrivacyPromiseRow(
                                 icon: "person.crop.circle.badge.xmark",
@@ -84,7 +84,7 @@ struct OnboardingView: View {
                         .controlSize(.large)
                         .disabled(isRequestingAccess)
 
-                        Text("FlickPic will ask for read and write access so it can review and privately categorize your library, then delete only items you later confirm.")
+                        Text("FlickPic will ask for read and write access so it can review your library and delete only items you later confirm. Private Vision categorization is optional.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

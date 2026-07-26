@@ -12,7 +12,15 @@ struct ReviewRepository {
         descriptor.fetchLimit = 1
 
         if let existing = try modelContext.fetch(descriptor).first {
-            if existing.migrateLegacyScreenshotConfiguration() {
+            var changed = existing.migrateLegacyCategoryConfiguration()
+            if !existing.hasStartedCategorization,
+               try !modelContext.fetch(
+                FetchDescriptor<AssetClassification>()
+               ).isEmpty {
+                existing.hasStartedCategorization = true
+                changed = true
+            }
+            if changed {
                 try modelContext.save()
             }
             return existing
@@ -33,6 +41,12 @@ struct ReviewRepository {
     func completeOnboarding() throws {
         let preference = try preference()
         preference.hasCompletedOnboarding = true
+        try modelContext.save()
+    }
+
+    func startCategorization() throws {
+        let preference = try preference()
+        preference.hasStartedCategorization = true
         try modelContext.save()
     }
 
@@ -149,6 +163,9 @@ struct ReviewRepository {
             if let classification = try classification(identifier: identifier) {
                 modelContext.delete(classification)
             }
+            for assignment in try visionAssignments(identifier: identifier) {
+                modelContext.delete(assignment)
+            }
         }
         try modelContext.save()
     }
@@ -175,18 +192,72 @@ struct ReviewRepository {
         )
     }
 
+    func visionTagsByAsset(
+        restrictedTo identifiers: Set<String>? = nil,
+        classifierVersion: Int? = nil
+    ) throws -> [String: Set<VisionTag>] {
+        var result: [String: Set<VisionTag>] = [:]
+        for assignment in try modelContext.fetch(
+            FetchDescriptor<VisionTagAssignment>()
+        ) {
+            guard identifiers == nil
+                    || identifiers?.contains(assignment.assetIdentifier) == true,
+                  classifierVersion == nil
+                    || assignment.classifierVersion == classifierVersion else {
+                continue
+            }
+            result[assignment.assetIdentifier, default: []].insert(assignment.tag)
+        }
+        return result
+    }
+
+    func clearVisionTags(
+        identifier: String
+    ) throws -> ClassificationIndexUpdate? {
+        let assignments = try visionAssignments(identifier: identifier)
+        guard !assignments.isEmpty else { return nil }
+        let previousIdentifiers = Set(assignments.map(\.tagIdentifier))
+        for assignment in assignments {
+            modelContext.delete(assignment)
+        }
+        try modelContext.save()
+        return ClassificationIndexUpdate(
+            kind: .asset,
+            assetIdentifier: identifier,
+            previousTagIdentifiers: previousIdentifiers,
+            tagIdentifiers: []
+        )
+    }
+
+    @discardableResult
     func saveClassification(
         identifier: String,
-        category: ContentCategory?,
-        confidence: Float,
+        tags: [VisionTag],
         modificationDate: Date?,
         classifierVersion: Int,
         status: ClassificationRecordStatus,
         attemptedAt: Date = .now
-    ) throws {
+    ) throws -> ClassificationIndexUpdate {
+        let existingAssignments = try visionAssignments(identifier: identifier)
+        let previousIdentifiers = Set(existingAssignments.map(\.tagIdentifier))
+        for assignment in existingAssignments {
+            modelContext.delete(assignment)
+        }
+
+        let savedTags = status == .classified ? tags : []
+        for tag in savedTags {
+            modelContext.insert(
+                VisionTagAssignment(
+                    assetIdentifier: identifier,
+                    tag: tag,
+                    classifierVersion: classifierVersion
+                )
+            )
+        }
+
         if let existing = try classification(identifier: identifier) {
-            existing.category = category
-            existing.confidence = confidence
+            existing.categoryRawValue = nil
+            existing.confidence = 0
             existing.assetModificationDate = modificationDate
             existing.classifierVersion = classifierVersion
             existing.status = status
@@ -195,8 +266,6 @@ struct ReviewRepository {
             modelContext.insert(
                 AssetClassification(
                     assetIdentifier: identifier,
-                    category: category,
-                    confidence: confidence,
                     assetModificationDate: modificationDate,
                     classifierVersion: classifierVersion,
                     status: status,
@@ -205,12 +274,21 @@ struct ReviewRepository {
             )
         }
         try modelContext.save()
+        return ClassificationIndexUpdate(
+            kind: .asset,
+            assetIdentifier: identifier,
+            previousTagIdentifiers: previousIdentifiers,
+            tagIdentifiers: Set(savedTags.map(\.identifier))
+        )
     }
 
     func removeClassificationRecords(for identifiers: Set<String>) throws {
         for identifier in identifiers {
             if let classification = try classification(identifier: identifier) {
                 modelContext.delete(classification)
+            }
+            for assignment in try visionAssignments(identifier: identifier) {
+                modelContext.delete(assignment)
             }
         }
         try modelContext.save()
@@ -219,6 +297,11 @@ struct ReviewRepository {
     func rebuildClassificationIndex() throws {
         for record in try modelContext.fetch(FetchDescriptor<AssetClassification>()) {
             modelContext.delete(record)
+        }
+        for assignment in try modelContext.fetch(
+            FetchDescriptor<VisionTagAssignment>()
+        ) {
+            modelContext.delete(assignment)
         }
         try modelContext.save()
     }
@@ -255,5 +338,17 @@ struct ReviewRepository {
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func visionAssignments(
+        identifier: String
+    ) throws -> [VisionTagAssignment] {
+        try modelContext.fetch(
+            FetchDescriptor<VisionTagAssignment>(
+                predicate: #Predicate {
+                    $0.assetIdentifier == identifier
+                }
+            )
+        )
     }
 }

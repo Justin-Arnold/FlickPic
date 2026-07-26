@@ -12,11 +12,17 @@ final class ReviewSessionModel: Identifiable {
     }
 
     let id = UUID()
-    let configuration: ReviewConfiguration
+    let request: ReviewRequest
 
     private let repository: ReviewRepository
     private let photoLibrary: any PhotoLibraryClient
+    private weak var classificationCoordinator: ClassificationCoordinator?
     private let hapticsEnabled: Bool
+    private var eligibleAssetsByIdentifier: [String: MediaAssetDescriptor] = [:]
+    private var visionIdentifiersByAsset: [String: Set<String>] = [:]
+    private var handledIdentifiers: Set<String> = []
+    private var updatesStream: AsyncStream<ClassificationIndexUpdate>?
+    private var updatesTask: Task<Void, Never>?
 
     private(set) var assets: [MediaAssetDescriptor] = []
     private(set) var isLoading = false
@@ -26,6 +32,10 @@ final class ReviewSessionModel: Identifiable {
     private(set) var initialAssetCount = 0
     private(set) var actionHistory: [ActionRecord] = []
     private(set) var hasEnded = false
+
+    var configuration: ReviewConfiguration {
+        request.configuration
+    }
 
     var currentAsset: MediaAssetDescriptor? {
         assets.first
@@ -40,16 +50,46 @@ final class ReviewSessionModel: Identifiable {
         return "\(min(processedCount + 1, initialAssetCount)) of \(initialAssetCount)"
     }
 
+    var isWaitingForMoreMatches: Bool {
+        guard case .vision = request.category,
+              currentAsset == nil,
+              classificationCoordinator?.isIndexing == true else {
+            return false
+        }
+        return true
+    }
+
     init(
+        request: ReviewRequest,
+        repository: ReviewRepository,
+        photoLibrary: any PhotoLibraryClient,
+        classificationCoordinator: ClassificationCoordinator? = nil,
+        hapticsEnabled: Bool
+    ) {
+        self.request = request
+        self.repository = repository
+        self.photoLibrary = photoLibrary
+        self.classificationCoordinator = classificationCoordinator
+        self.hapticsEnabled = hapticsEnabled
+        if case .vision = request.category {
+            updatesStream = classificationCoordinator?.updates()
+        }
+    }
+
+    convenience init(
         configuration: ReviewConfiguration,
         repository: ReviewRepository,
         photoLibrary: any PhotoLibraryClient,
+        classificationCoordinator: ClassificationCoordinator? = nil,
         hapticsEnabled: Bool
     ) {
-        self.configuration = configuration
-        self.repository = repository
-        self.photoLibrary = photoLibrary
-        self.hapticsEnabled = hapticsEnabled
+        self.init(
+            request: ReviewRequest(configuration: configuration),
+            repository: repository,
+            photoLibrary: photoLibrary,
+            classificationCoordinator: classificationCoordinator,
+            hapticsEnabled: hapticsEnabled
+        )
     }
 
     func load() async {
@@ -61,32 +101,30 @@ final class ReviewSessionModel: Identifiable {
             let reviewed = try repository.reviewedIdentifiers()
             let pending = try repository.pendingIdentifiers()
             let fetched = try await photoLibrary.fetchAssets(
-                configuration: configuration,
+                configuration: request.configuration,
                 reviewedIdentifiers: reviewed,
                 pendingIdentifiers: pending
             )
-            let classifications = try repository.classificationSnapshots()
+            eligibleAssetsByIdentifier = Dictionary(
+                uniqueKeysWithValues: fetched.map { ($0.id, $0) }
+            )
+            visionIdentifiersByAsset = try repository
+                .visionTagsByAsset(
+                    restrictedTo: Set(eligibleAssetsByIdentifier.keys),
+                    classifierVersion: classificationCoordinator?.classifierVersion
+                )
+                .mapValues { Set($0.map(\.identifier)) }
             let filtered = fetched.filter { asset in
-                let snapshot = classifications[asset.id]
-                let indexedCategory: ContentCategory?
-                if snapshot?.status == .classified,
-                   snapshot?.isCurrent(
-                    for: asset,
-                    classifierVersion: ImageClassificationPolicy.classifierVersion
-                   ) == true {
-                    indexedCategory = snapshot?.category
-                } else {
-                    indexedCategory = nil
-                }
-                return configuration.matchesCategory(
+                request.matchesCategory(
                     asset: asset,
-                    indexedCategory: indexedCategory
+                    visionTagIdentifiers: visionIdentifiersByAsset[asset.id] ?? []
                 )
             }
             assets = filtered
             initialAssetCount = filtered.count
             pendingCount = pending.count
             preheatUpcomingAssets()
+            beginObservingUpdatesIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -154,6 +192,7 @@ final class ReviewSessionModel: Identifiable {
                 identifier: action.asset.id,
                 to: action.previousState
             )
+            handledIdentifiers.remove(action.asset.id)
             assets.insert(action.asset, at: 0)
             processedCount = action.processedBeforeAction
             pendingCount = try repository.pendingIdentifiers().count
@@ -167,6 +206,9 @@ final class ReviewSessionModel: Identifiable {
 
     func retry() async {
         assets.removeAll()
+        eligibleAssetsByIdentifier.removeAll()
+        visionIdentifiersByAsset.removeAll()
+        handledIdentifiers.removeAll()
         processedCount = 0
         initialAssetCount = 0
         actionHistory.removeAll()
@@ -175,6 +217,8 @@ final class ReviewSessionModel: Identifiable {
 
     func endSession() {
         hasEnded = true
+        updatesTask?.cancel()
+        updatesTask = nil
         photoLibrary.stopPreheating()
     }
 
@@ -189,6 +233,7 @@ final class ReviewSessionModel: Identifiable {
                 processedBeforeAction: processedCount
             )
         )
+        handledIdentifiers.insert(asset.id)
         assets.removeFirst()
         processedCount += 1
         preheatUpcomingAssets()
@@ -200,6 +245,105 @@ final class ReviewSessionModel: Identifiable {
             identifiers: identifiers,
             targetSize: CGSize(width: 1_200, height: 1_600)
         )
+    }
+
+    private func beginObservingUpdatesIfNeeded() {
+        guard updatesTask == nil, let updatesStream else { return }
+        updatesTask = Task { @MainActor [weak self] in
+            for await update in updatesStream {
+                guard let self, !self.hasEnded else { return }
+                self.apply(update)
+            }
+        }
+    }
+
+    private func apply(_ update: ClassificationIndexUpdate) {
+        guard case let .vision(selectedIdentifier) = request.category else {
+            return
+        }
+
+        if update.kind == .reset {
+            do {
+                visionIdentifiersByAsset = try repository
+                    .visionTagsByAsset(
+                        restrictedTo: Set(eligibleAssetsByIdentifier.keys),
+                        classifierVersion: classificationCoordinator?.classifierVersion
+                    )
+                    .mapValues { Set($0.map(\.identifier)) }
+                reconcileAllAssets(selectedIdentifier: selectedIdentifier)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        guard let identifier = update.assetIdentifier,
+              let asset = eligibleAssetsByIdentifier[identifier] else {
+            return
+        }
+        visionIdentifiersByAsset[identifier] = update.tagIdentifiers
+        reconcile(
+            asset: asset,
+            matches: update.tagIdentifiers.contains(selectedIdentifier)
+        )
+    }
+
+    private func reconcileAllAssets(selectedIdentifier: String) {
+        for asset in eligibleAssetsByIdentifier.values {
+            reconcile(
+                asset: asset,
+                matches: visionIdentifiersByAsset[asset.id]?
+                    .contains(selectedIdentifier) == true
+            )
+        }
+    }
+
+    private func reconcile(asset: MediaAssetDescriptor, matches: Bool) {
+        let existingIndex = assets.firstIndex(where: { $0.id == asset.id })
+        if matches {
+            guard existingIndex == nil,
+                  !handledIdentifiers.contains(asset.id) else {
+                return
+            }
+            insertNewMatch(asset)
+            initialAssetCount += 1
+            preheatUpcomingAssets()
+        } else if let existingIndex,
+                  existingIndex != assets.startIndex {
+            assets.remove(at: existingIndex)
+            initialAssetCount = max(processedCount, initialAssetCount - 1)
+            preheatUpcomingAssets()
+        }
+    }
+
+    private func insertNewMatch(_ asset: MediaAssetDescriptor) {
+        guard let current = assets.first else {
+            assets = [asset]
+            return
+        }
+
+        var remaining = Array(assets.dropFirst())
+        remaining.append(asset)
+        remaining.sort(by: assetsAreInConfiguredOrder)
+        assets = [current] + remaining
+    }
+
+    private func assetsAreInConfiguredOrder(
+        _ lhs: MediaAssetDescriptor,
+        _ rhs: MediaAssetDescriptor
+    ) -> Bool {
+        switch (lhs.creationDate, rhs.creationDate) {
+        case let (left?, right?) where left != right:
+            return request.configuration.order == .oldestFirst
+                ? left < right
+                : left > right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return lhs.id < rhs.id
+        }
     }
 
     private func provideFeedback(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {

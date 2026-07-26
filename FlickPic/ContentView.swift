@@ -21,6 +21,11 @@ struct ContentView: View {
             || preferences.first(where: { $0.key == "primary" })?.hasCompletedOnboarding == true
     }
 
+    private var hasStartedCategorization: Bool {
+        preferences.first(where: { $0.key == "primary" })?
+            .hasStartedCategorization == true
+    }
+
     var body: some View {
         Group {
             if hasCompletedOnboarding {
@@ -62,6 +67,7 @@ struct ContentView: View {
 
     private func startAutomaticIndexingIfPossible() {
         guard hasCompletedOnboarding,
+              hasStartedCategorization,
               scenePhase == .active,
               photoLibrary.authorizationState.canReadLibrary else {
             return
@@ -83,7 +89,8 @@ struct ContentView: View {
                 ReviewedAsset.self,
                 PendingDeletion.self,
                 AppPreference.self,
-                AssetClassification.self
+                AssetClassification.self,
+                VisionTagAssignment.self
             ],
             inMemory: true
         )

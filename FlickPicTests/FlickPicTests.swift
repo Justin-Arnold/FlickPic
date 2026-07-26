@@ -66,6 +66,7 @@ struct ReviewRepositoryTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -124,6 +125,7 @@ struct PendingDeletionQueueTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -314,6 +316,7 @@ struct ReviewSessionModelTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -344,14 +347,16 @@ struct ReviewConfigurationTests {
     }
 
     @Test
-    func screenshotsAlwaysUseThePhotoFilter() {
+    func categorySelectionDoesNotRewriteSavedMediaFilter() {
         var configuration = ReviewConfiguration()
-        configuration.category = .screenshots
         configuration.mediaFilter = .videos
+        let request = ReviewRequest(
+            configuration: configuration,
+            category: .metadata(.screenshots)
+        )
 
-        #expect(configuration.effectiveMediaFilter == .photos)
-        #expect(configuration.summary.contains("Screenshots"))
-        #expect(!configuration.summary.contains("Videos"))
+        #expect(request.configuration.effectiveMediaFilter == .videos)
+        #expect(request.configuration.summary.contains("Videos"))
     }
 }
 
@@ -459,7 +464,7 @@ struct GIFAnimationTests {
 @MainActor
 struct ImageClassificationPolicyTests {
     @Test
-    func receiptWinsOverDocumentInTheExclusiveHierarchy() {
+    func keepsArbitraryHighPrecisionLabelsOrderedByConfidence() {
         let result = ImageClassificationPolicy.resolve(
             candidates: [
                 ClassificationCandidate(
@@ -476,52 +481,72 @@ struct ImageClassificationPolicyTests {
             classifierVersion: 7
         )
 
-        #expect(result.category == .receipt)
-        #expect(result.confidence == 0.91)
+        #expect(result.tags.map(\.identifier) == ["document", "receipt"])
+        #expect(result.tags.map(\.confidence) == [0.99, 0.91])
         #expect(result.classifierVersion == 7)
     }
 
     @Test
-    func documentRequiresHighPrecisionAndOtherwiseFallsBackToOtherPhoto() {
-        let document = ImageClassificationPolicy.resolve(
-            candidates: [
+    func filtersNoiseDeduplicatesAndCapsResultsAtFive() {
+        let result = ImageClassificationPolicy.resolve(
+            candidates: (0..<7).flatMap { index in
+                [
+                    ClassificationCandidate(
+                        identifier: "label-\(index)",
+                        confidence: Float(100 - index) / 100,
+                        meetsHighPrecision: true
+                    ),
+                    ClassificationCandidate(
+                        identifier: "label-\(index)",
+                        confidence: 0.1,
+                        meetsHighPrecision: index != 6
+                    )
+                ]
+            } + [
                 ClassificationCandidate(
-                    identifier: "receipt",
-                    confidence: 0.95,
+                    identifier: "noise",
+                    confidence: 1,
                     meetsHighPrecision: false
-                ),
-                ClassificationCandidate(
-                    identifier: "document",
-                    confidence: 0.92,
-                    meetsHighPrecision: true
                 )
             ],
-            classifierVersion: 1
+            classifierVersion: 2
         )
-        let other = ImageClassificationPolicy.resolve(
+
+        #expect(result.tags.count == 5)
+        #expect(
+            result.tags.map(\.identifier)
+                == ["label-0", "label-1", "label-2", "label-3", "label-4"]
+        )
+        #expect(!result.tags.map(\.identifier).contains("noise"))
+    }
+
+    @Test
+    func successfulClassificationCanProduceNoTags() {
+        let result = ImageClassificationPolicy.resolve(
             candidates: [
                 ClassificationCandidate(
-                    identifier: "document",
+                    identifier: "uncertain",
                     confidence: 0.89,
                     meetsHighPrecision: false
                 )
             ],
-            classifierVersion: 1
+            classifierVersion: 2
         )
 
-        #expect(document.category == .document)
-        #expect(other.category == .otherPhoto)
+        #expect(result.tags.isEmpty)
+        #expect(VisionTag.displayTitle(for: "hot_dog-food") == "Hot Dog Food")
     }
 }
 
 @MainActor
 struct ClassificationPersistenceTests {
     @Test
-    func legacyScreenshotScopeMigratesToTheCategoryDimension() throws {
+    func legacyCategoryConfigurationMigratesToDynamicDashboardDefaults() throws {
         let container = try makeContainer()
         let preference = AppPreference()
         preference.scopeRawValue = ReviewScopeKind.screenshots.rawValue
         preference.mediaFilterRawValue = MediaFilter.videos.rawValue
+        preference.categoryRawValue = "receipts"
         container.mainContext.insert(preference)
         try container.mainContext.save()
 
@@ -530,29 +555,96 @@ struct ClassificationPersistenceTests {
 
         #expect(migrated.scopeRawValue == ReviewScopeKind.unreviewed.rawValue)
         #expect(migrated.configuration.scope == .unreviewed)
-        #expect(migrated.configuration.category == .screenshots)
         #expect(migrated.configuration.mediaFilter == .photos)
+        #expect(migrated.categoryRawValue == "any")
     }
 
     @Test
-    func resetHistoryPreservesClassificationsButAssetRemovalDoesNot() throws {
+    func existingClassificationCachePreservesPriorCategorizationOptIn() throws {
+        let container = try makeContainer()
+        let preference = AppPreference(hasStartedCategorization: false)
+        let classification = AssetClassification(
+            assetIdentifier: "legacy",
+            assetModificationDate: nil,
+            classifierVersion: 1,
+            status: .classified
+        )
+        classification.categoryRawValue = "receipts"
+        classification.confidence = 0.97
+        container.mainContext.insert(preference)
+        container.mainContext.insert(classification)
+        try container.mainContext.save()
+
+        let migrated = try ReviewRepository(modelContext: container.mainContext)
+            .preference()
+
+        #expect(migrated.hasStartedCategorization)
+    }
+
+    @Test
+    func resetHistoryPreservesTagsButAssetRemovalDoesNot() throws {
         let container = try makeContainer()
         let repository = ReviewRepository(modelContext: container.mainContext)
         try repository.markKept(identifier: "receipt")
         try repository.saveClassification(
             identifier: "receipt",
-            category: .receipt,
-            confidence: 0.95,
+            tags: [
+                VisionTag(identifier: "receipt", confidence: 0.95),
+                VisionTag(identifier: "document", confidence: 0.91)
+            ],
             modificationDate: Date(timeIntervalSince1970: 100),
             classifierVersion: ImageClassificationPolicy.classifierVersion,
             status: .classified
         )
 
         try repository.resetReviewHistory()
-        #expect(try repository.classificationSnapshots()["receipt"]?.category == .receipt)
+        #expect(
+            try repository.visionTagsByAsset()["receipt"]?.map(\.identifier)
+                .sorted() == ["document", "receipt"]
+        )
 
         try repository.removeRecords(for: ["receipt"])
         #expect(try repository.classificationSnapshots()["receipt"] == nil)
+        #expect(try repository.visionTagsByAsset()["receipt"] == nil)
+    }
+
+    @Test
+    func replacingClassificationReplacesAllPriorTagsAtomically() throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let date = Date(timeIntervalSince1970: 100)
+
+        try repository.saveClassification(
+            identifier: "asset",
+            tags: [
+                VisionTag(identifier: "dog", confidence: 0.9),
+                VisionTag(identifier: "outdoors", confidence: 0.8)
+            ],
+            modificationDate: date,
+            classifierVersion: 2,
+            status: .classified
+        )
+        let update = try repository.saveClassification(
+            identifier: "asset",
+            tags: [VisionTag(identifier: "cat", confidence: 0.95)],
+            modificationDate: date,
+            classifierVersion: 2,
+            status: .classified
+        )
+
+        #expect(update.previousTagIdentifiers == ["dog", "outdoors"])
+        #expect(update.tagIdentifiers == ["cat"])
+        #expect(
+            try repository.visionTagsByAsset()["asset"]?
+                .map(\.identifier) == ["cat"]
+        )
+        #expect(
+            try repository.visionTagsByAsset(classifierVersion: 1)["asset"] == nil
+        )
+        #expect(
+            try repository.visionTagsByAsset(classifierVersion: 2)["asset"]?
+                .map(\.identifier) == ["cat"]
+        )
     }
 
     @Test
@@ -569,8 +661,6 @@ struct ClassificationPersistenceTests {
         )
         let snapshot = ClassificationCacheSnapshot(
             assetIdentifier: "asset",
-            category: .document,
-            confidence: 0.9,
             assetModificationDate: originalDate,
             classifierVersion: 1,
             status: .classified,
@@ -588,6 +678,7 @@ struct ClassificationPersistenceTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -596,45 +687,46 @@ struct ClassificationPersistenceTests {
 @MainActor
 struct CategoryDeckTests {
     @Test
-    func categoryFiltersRemainExclusive() async throws {
+    func metadataAndVisionCategoriesCanOverlap() async throws {
         let container = try makeContainer()
         let repository = ReviewRepository(modelContext: container.mainContext)
         let screenshot = MediaAssetDescriptor.fixture(id: "screenshot", screenshot: true)
-        let receipt = MediaAssetDescriptor.fixture(id: "receipt")
         let document = MediaAssetDescriptor.fixture(id: "document")
-        let other = MediaAssetDescriptor.fixture(id: "other")
         let library = FakePhotoLibraryClient(
-            assets: [screenshot, receipt, document, other]
+            assets: [screenshot, document]
         )
 
         try save(
-            category: .screenshot,
+            tags: ["document", "text"],
             asset: screenshot,
             repository: repository
         )
-        try save(category: .receipt, asset: receipt, repository: repository)
-        try save(category: .document, asset: document, repository: repository)
-        try save(category: .otherPhoto, asset: other, repository: repository)
+        try save(tags: ["document"], asset: document, repository: repository)
 
-        let expectations: [(ContentCategoryFilter, [String])] = [
-            (.screenshots, ["screenshot"]),
-            (.receipts, ["receipt"]),
-            (.documents, ["document"]),
-            (.otherPhotos, ["other"])
-        ]
+        let screenshotModel = ReviewSessionModel(
+            request: ReviewRequest(
+                configuration: ReviewConfiguration(),
+                category: .metadata(.screenshots)
+            ),
+            repository: repository,
+            photoLibrary: library,
+            hapticsEnabled: false
+        )
+        await screenshotModel.load()
 
-        for (category, identifiers) in expectations {
-            var configuration = ReviewConfiguration()
-            configuration.category = category
-            let model = ReviewSessionModel(
-                configuration: configuration,
-                repository: repository,
-                photoLibrary: library,
-                hapticsEnabled: false
-            )
-            await model.load()
-            #expect(model.assets.map(\.id) == identifiers)
-        }
+        let documentModel = ReviewSessionModel(
+            request: ReviewRequest(
+                configuration: ReviewConfiguration(),
+                category: .vision("document")
+            ),
+            repository: repository,
+            photoLibrary: library,
+            hapticsEnabled: false
+        )
+        await documentModel.load()
+
+        #expect(screenshotModel.assets.map(\.id) == ["screenshot"])
+        #expect(documentModel.assets.map(\.id) == ["screenshot", "document"])
     }
 
     @Test
@@ -672,20 +764,22 @@ struct CategoryDeckTests {
         let library = FakePhotoLibraryClient(assets: assets)
 
         for asset in [included, favorite, reviewed, tooOld, video] {
-            try save(category: .receipt, asset: asset, repository: repository)
+            try save(tags: ["receipt"], asset: asset, repository: repository)
         }
-        try save(category: .document, asset: document, repository: repository)
+        try save(tags: ["document"], asset: document, repository: repository)
         try repository.markKept(identifier: reviewed.id)
 
         var configuration = ReviewConfiguration()
         configuration.scope = .recent
         configuration.recentDays = 7
-        configuration.category = .receipts
-        configuration.mediaFilter = .videos
+        configuration.mediaFilter = .photos
         configuration.order = .newestFirst
 
         let protectedModel = ReviewSessionModel(
-            configuration: configuration,
+            request: ReviewRequest(
+                configuration: configuration,
+                category: .vision("receipt")
+            ),
             repository: repository,
             photoLibrary: library,
             hapticsEnabled: false
@@ -696,7 +790,10 @@ struct CategoryDeckTests {
         configuration.includeFavorites = true
         configuration.includeReviewed = true
         let inclusiveModel = ReviewSessionModel(
-            configuration: configuration,
+            request: ReviewRequest(
+                configuration: configuration,
+                category: .vision("receipt")
+            ),
             repository: repository,
             photoLibrary: library,
             hapticsEnabled: false
@@ -709,14 +806,15 @@ struct CategoryDeckTests {
     }
 
     private func save(
-        category: ContentCategory,
+        tags: [String],
         asset: MediaAssetDescriptor,
         repository: ReviewRepository
     ) throws {
         try repository.saveClassification(
             identifier: asset.id,
-            category: category,
-            confidence: 1,
+            tags: tags.map {
+                VisionTag(identifier: $0, confidence: 1)
+            },
             modificationDate: asset.modificationDate,
             classifierVersion: ImageClassificationPolicy.classifierVersion,
             status: .classified
@@ -729,6 +827,82 @@ struct CategoryDeckTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+    }
+}
+
+@MainActor
+struct CategoryDashboardTests {
+    @Test
+    func hidesEmptyFacetsAndStreamsVisionBucketCounts() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let photo = MediaAssetDescriptor.fixture(id: "photo", screenshot: true)
+        let secondPhoto = MediaAssetDescriptor.fixture(id: "second-photo")
+        let video = MediaAssetDescriptor.fixture(id: "video", kind: .video)
+        let favorite = MediaAssetDescriptor.fixture(
+            id: "favorite",
+            favorite: true,
+            panorama: true
+        )
+        let library = FakePhotoLibraryClient(
+            assets: [photo, secondPhoto, video, favorite]
+        )
+        let coordinator = ClassificationCoordinator(
+            classifier: FakeImageClassificationClient(
+                results: [
+                    photo.id: ImageClassificationResult(
+                        tags: [VisionTag(identifier: "dog", confidence: 0.95)],
+                        classifierVersion: ImageClassificationPolicy.classifierVersion
+                    ),
+                    secondPhoto.id: ImageClassificationResult(
+                        tags: [VisionTag(identifier: "dog", confidence: 0.94)],
+                        classifierVersion: ImageClassificationPolicy.classifierVersion
+                    )
+                ]
+            )
+        )
+        let dashboard = CategoryDashboardModel()
+
+        await dashboard.load(
+            configuration: ReviewConfiguration(),
+            repository: repository,
+            photoLibrary: library,
+            coordinator: coordinator
+        )
+
+        #expect(
+            dashboard.metadataBuckets.map(\.category)
+                == [
+                    .metadata(.images),
+                    .metadata(.videos),
+                    .metadata(.screenshots)
+                ]
+        )
+        #expect(dashboard.visionBuckets.isEmpty)
+
+        _ = await coordinator.runLocalIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<50
+            where dashboard.visionBuckets.first?.count != 2 {
+            await Task.yield()
+        }
+
+        #expect(dashboard.visionBuckets.first?.category == .vision("dog"))
+        #expect(dashboard.visionBuckets.first?.count == 2)
+    }
+
+    private func makeContainer() throws -> ModelContainer {
+        try ModelContainer(
+            for: ReviewedAsset.self,
+            PendingDeletion.self,
+            AppPreference.self,
+            AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -737,7 +911,7 @@ struct CategoryDeckTests {
 @MainActor
 struct ClassificationCoordinatorTests {
     @Test
-    func screenshotBypassesVisionAndCloudAssetsRetryExplicitly() async throws {
+    func allImagesUseVisionAndCloudAssetsRetryInBackground() async throws {
         let container = try makeContainer()
         let repository = ReviewRepository(modelContext: container.mainContext)
         let screenshot = MediaAssetDescriptor.fixture(id: "screenshot", screenshot: true)
@@ -751,14 +925,22 @@ struct ClassificationCoordinatorTests {
         let probe = ClassificationProbe()
         let classifier = FakeImageClassificationClient(
             results: [
+                "screenshot": ImageClassificationResult(
+                    tags: [
+                        VisionTag(identifier: "text", confidence: 0.96)
+                    ],
+                    classifierVersion: ImageClassificationPolicy.classifierVersion
+                ),
                 "receipt": ImageClassificationResult(
-                    category: .receipt,
-                    confidence: 0.94,
+                    tags: [
+                        VisionTag(identifier: "receipt", confidence: 0.94)
+                    ],
                     classifierVersion: ImageClassificationPolicy.classifierVersion
                 ),
                 "cloud-document": ImageClassificationResult(
-                    category: .document,
-                    confidence: 0.93,
+                    tags: [
+                        VisionTag(identifier: "document", confidence: 0.93)
+                    ],
                     classifierVersion: ImageClassificationPolicy.classifierVersion
                 )
             ],
@@ -772,23 +954,22 @@ struct ClassificationCoordinatorTests {
         )
 
         var snapshots = try repository.classificationSnapshots()
-        #expect(snapshots["screenshot"]?.category == .screenshot)
-        #expect(snapshots["receipt"]?.category == .receipt)
+        var tags = try repository.visionTagsByAsset()
+        #expect(tags["screenshot"]?.map(\.identifier) == ["text"])
+        #expect(tags["receipt"]?.map(\.identifier) == ["receipt"])
         #expect(snapshots["cloud-document"]?.status == .deferredCloud)
         let classifiedIdentifiers = await probe.identifiers
-        #expect(!classifiedIdentifiers.contains("screenshot"))
+        #expect(classifiedIdentifiers.contains("screenshot"))
 
-        var configuration = ReviewConfiguration()
-        configuration.category = .documents
-        let outcome = await coordinator.prepareCategory(
-            configuration: configuration,
+        let completed = await coordinator.runBackgroundIndexing(
             repository: repository,
             photoLibrary: library
         )
 
         snapshots = try repository.classificationSnapshots()
-        #expect(!outcome.wasCanceled)
-        #expect(snapshots["cloud-document"]?.category == .document)
+        tags = try repository.visionTagsByAsset()
+        #expect(completed)
+        #expect(tags["cloud-document"]?.map(\.identifier) == ["document"])
         #expect(
             library.classificationRequests.contains {
                 $0.identifier == "cloud-document" && $0.allowNetworkAccess
@@ -824,7 +1005,31 @@ struct ClassificationCoordinatorTests {
     }
 
     @Test
-    func failedItemsStayUnknownUntilExplicitlyRetried() async throws {
+    func reviewModeReducesClassificationConcurrencyToOne() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let library = FakePhotoLibraryClient(
+            assets: (0..<6).map { .fixture(id: "review-\($0)") }
+        )
+        let probe = ClassificationProbe()
+        let coordinator = ClassificationCoordinator(
+            classifier: FakeImageClassificationClient(
+                delay: .milliseconds(10),
+                probe: probe
+            )
+        )
+        coordinator.setReviewActive(true)
+
+        _ = await coordinator.runLocalIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+
+        #expect(await probe.maximumConcurrentCalls == 1)
+    }
+
+    @Test
+    func failedItemsStayUnknownUntilRetried() async throws {
         let container = try makeContainer()
         let repository = ReviewRepository(modelContext: container.mainContext)
         let asset = MediaAssetDescriptor.fixture(id: "broken")
@@ -834,11 +1039,7 @@ struct ClassificationCoordinatorTests {
                 failingIdentifiers: ["broken"]
             )
         )
-        var configuration = ReviewConfiguration()
-        configuration.category = .otherPhotos
-
-        let failedOutcome = await failingCoordinator.prepareCategory(
-            configuration: configuration,
+        let failedOutcome = await failingCoordinator.runLocalIndexing(
             repository: repository,
             photoLibrary: library
         )
@@ -846,24 +1047,18 @@ struct ClassificationCoordinatorTests {
         #expect(failedOutcome.failedCount == 1)
         #expect(try repository.classificationSnapshots()["broken"]?.status == .failed)
 
-        // The next scan uses a replacement classifier, so keep the intentionally
-        // failing coordinator from auto-retrying against the same repository.
-        failingCoordinator.setReviewActive(true)
         try failingCoordinator.retryFailed(repository: repository)
         let successfulCoordinator = ClassificationCoordinator(
             classifier: FakeImageClassificationClient()
         )
-        let successOutcome = await successfulCoordinator.prepareCategory(
-            configuration: configuration,
+        let successOutcome = await successfulCoordinator.runLocalIndexing(
             repository: repository,
             photoLibrary: library
         )
 
         #expect(successOutcome.failedCount == 0)
-        #expect(
-            try repository.classificationSnapshots()["broken"]?.category
-                == .otherPhoto
-        )
+        #expect(try repository.classificationSnapshots()["broken"]?.status == .classified)
+        #expect(try repository.visionTagsByAsset()["broken"] == nil)
     }
 
     @Test
@@ -876,12 +1071,8 @@ struct ClassificationCoordinatorTests {
         let coordinator = ClassificationCoordinator(
             classifier: FakeImageClassificationClient(delay: .milliseconds(30))
         )
-        var configuration = ReviewConfiguration()
-        configuration.category = .receipts
-
         let scan = Task { @MainActor in
-            await coordinator.prepareCategory(
-                configuration: configuration,
+            await coordinator.runLocalIndexing(
                 repository: repository,
                 photoLibrary: library
             )
@@ -893,13 +1084,72 @@ struct ClassificationCoordinatorTests {
             }
             try await Task.sleep(for: .milliseconds(5))
         }
-        coordinator.cancelCurrentWork()
+        scan.cancel()
         let outcome = await scan.value
         let savedCount = try repository.classificationSnapshots().count
 
         #expect(outcome.wasCanceled)
         #expect(savedCount >= 2)
         #expect(savedCount < library.assets.count)
+    }
+
+    @Test
+    func activeVisionDeckAppendsMatchesWithoutReplacingCurrentCard() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let first = MediaAssetDescriptor.fixture(
+            id: "first",
+            date: Date(timeIntervalSince1970: 100)
+        )
+        let second = MediaAssetDescriptor.fixture(
+            id: "second",
+            date: Date(timeIntervalSince1970: 200)
+        )
+        let library = FakePhotoLibraryClient(assets: [first, second])
+        let result = ImageClassificationResult(
+            tags: [VisionTag(identifier: "dog", confidence: 0.95)],
+            classifierVersion: ImageClassificationPolicy.classifierVersion
+        )
+        let coordinator = ClassificationCoordinator(
+            classifier: FakeImageClassificationClient(
+                results: ["first": result, "second": result],
+                delay: .milliseconds(20)
+            )
+        )
+        coordinator.setReviewActive(true)
+        let model = ReviewSessionModel(
+            request: ReviewRequest(
+                configuration: ReviewConfiguration(),
+                category: .vision("dog")
+            ),
+            repository: repository,
+            photoLibrary: library,
+            classificationCoordinator: coordinator,
+            hapticsEnabled: false
+        )
+        await model.load()
+        #expect(model.assets.isEmpty)
+
+        let scan = Task { @MainActor in
+            await coordinator.runLocalIndexing(
+                repository: repository,
+                photoLibrary: library
+            )
+        }
+        for _ in 0..<100 where model.assets.isEmpty {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        let firstVisibleIdentifier = model.currentAsset?.id
+        for _ in 0..<100 where model.assets.count < 2 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        _ = await scan.value
+
+        #expect(firstVisibleIdentifier == "first")
+        #expect(model.currentAsset?.id == firstVisibleIdentifier)
+        #expect(model.assets.map(\.id) == ["first", "second"])
+        #expect(model.positionText == "1 of 2")
+        model.endSession()
     }
 
     @Test
@@ -915,8 +1165,7 @@ struct ClassificationCoordinatorTests {
         let library = FakePhotoLibraryClient(assets: [modified])
         try repository.saveClassification(
             identifier: modified.id,
-            category: .document,
-            confidence: 0.95,
+            tags: [VisionTag(identifier: "document", confidence: 0.95)],
             modificationDate: oldDate,
             classifierVersion: ImageClassificationPolicy.classifierVersion,
             status: .classified
@@ -925,8 +1174,9 @@ struct ClassificationCoordinatorTests {
             classifier: FakeImageClassificationClient(
                 results: [
                     modified.id: ImageClassificationResult(
-                        category: .receipt,
-                        confidence: 0.96,
+                        tags: [
+                            VisionTag(identifier: "receipt", confidence: 0.96)
+                        ],
                         classifierVersion: ImageClassificationPolicy.classifierVersion
                     )
                 ]
@@ -939,8 +1189,11 @@ struct ClassificationCoordinatorTests {
         )
 
         let snapshot = try repository.classificationSnapshots()[modified.id]
-        #expect(snapshot?.category == .receipt)
         #expect(snapshot?.assetModificationDate == newDate)
+        #expect(
+            try repository.visionTagsByAsset()[modified.id]?
+                .map(\.identifier) == ["receipt"]
+        )
         #expect(library.classificationRequests.map(\.identifier) == [modified.id])
     }
 
@@ -950,6 +1203,7 @@ struct ClassificationCoordinatorTests {
             PendingDeletion.self,
             AppPreference.self,
             AssetClassification.self,
+            VisionTagAssignment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }

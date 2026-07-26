@@ -13,7 +13,9 @@ struct HomeView: View {
     @State private var showingQueue = false
     @State private var showingSettings = false
     @State private var activeSession: ReviewSessionModel?
-    @State private var categoryPreparation: CategoryPreparationRequest?
+    @State private var dashboard = CategoryDashboardModel()
+    @State private var dashboardRefreshToken = UUID()
+    @State private var errorMessage: String?
 
     private var preference: AppPreference? {
         preferences.first(where: { $0.key == "primary" })
@@ -23,27 +25,29 @@ struct HomeView: View {
         preference?.configuration ?? ReviewConfiguration()
     }
 
+    private var hasStartedCategorization: Bool {
+        preference?.hasStartedCategorization == true
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 24) {
-                Spacer()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 42, weight: .medium))
+                            .foregroundStyle(.indigo)
+                            .accessibilityHidden(true)
+                        Text("FlickPic")
+                            .font(.largeTitle.bold())
+                        Text("Keep what matters. Queue the rest.")
+                            .foregroundStyle(.secondary)
+                    }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Image(systemName: "photo.stack")
-                        .font(.system(size: 42, weight: .medium))
-                        .foregroundStyle(.indigo)
-                        .accessibilityHidden(true)
-                    Text("FlickPic")
-                        .font(.largeTitle.bold())
-                    Text("Keep what matters. Queue the rest.")
-                        .foregroundStyle(.secondary)
+                    authorizationContent
                 }
-
-                authorizationContent
-
-                Spacer()
+                .padding(24)
             }
-            .padding(24)
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -54,8 +58,13 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingSetup) {
                 SessionSetupView(configuration: configuration) { newConfiguration in
-                    try? ReviewRepository(modelContext: modelContext)
-                        .saveConfiguration(newConfiguration)
+                    do {
+                        try ReviewRepository(modelContext: modelContext)
+                            .saveConfiguration(newConfiguration)
+                        dashboardRefreshToken = UUID()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
                     showingSetup = false
                 }
             }
@@ -72,35 +81,49 @@ struct HomeView: View {
                     )
                 }
             }
-            .sheet(item: $categoryPreparation) { request in
-                CategoryPreparationView(
-                    configuration: request.configuration,
-                    coordinator: classificationCoordinator,
-                    repository: ReviewRepository(modelContext: modelContext),
-                    photoLibrary: photoLibrary
-                ) {
-                    categoryPreparation = nil
-                    Task { @MainActor in
-                        await Task.yield()
-                        launchSession(configuration: request.configuration)
-                    }
-                } onCancel: {
-                    categoryPreparation = nil
-                    Task { @MainActor in
-                        await Task.yield()
-                        showingSetup = true
-                    }
+            .fullScreenCover(
+                item: $activeSession,
+                onDismiss: {
+                    classificationCoordinator.setReviewActive(false)
+                    dashboardRefreshToken = UUID()
                 }
-            }
-            .fullScreenCover(item: $activeSession) { session in
+            ) { session in
                 ReviewSessionView(
                     model: session,
-                    photoLibrary: photoLibrary
+                    photoLibrary: photoLibrary,
+                    classificationCoordinator: classificationCoordinator
                 ) {
                     session.endSession()
                     activeSession = nil
                     classificationCoordinator.setReviewActive(false)
+                    dashboardRefreshToken = UUID()
                 }
+            }
+            .task(id: dashboardRefreshToken) {
+                guard photoLibrary.authorizationState.canReadLibrary else { return }
+                await dashboard.load(
+                    configuration: configuration,
+                    repository: ReviewRepository(modelContext: modelContext),
+                    photoLibrary: photoLibrary,
+                    coordinator: classificationCoordinator
+                )
+            }
+            .onChange(of: photoLibrary.changeVersion) {
+                dashboardRefreshToken = UUID()
+            }
+            .onChange(of: photoLibrary.authorizationState) {
+                dashboardRefreshToken = UUID()
+            }
+            .alert(
+                "Something Went Wrong",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
             }
         }
     }
@@ -109,7 +132,7 @@ struct HomeView: View {
     private var authorizationContent: some View {
         switch photoLibrary.authorizationState {
         case .full, .limited:
-            VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 18) {
                 if photoLibrary.authorizationState == .limited {
                     Label(
                         "Only your selected Photos items are available.",
@@ -122,53 +145,8 @@ struct HomeView: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
                 }
 
-                Button {
-                    startSession()
-                } label: {
-                    Label("Start Reviewing", systemImage: "hand.draw")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .accessibilityIdentifier("start-reviewing")
-
-                Button {
-                    showingSetup = true
-                } label: {
-                    HStack {
-                        Image(systemName: "line.3.horizontal.decrease")
-                        Text(configuration.summary)
-                            .lineLimit(1)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .accessibilityLabel("Review setup, \(configuration.summary)")
-                .accessibilityIdentifier("review-setup")
-
-                if !pendingItems.isEmpty {
-                    Button {
-                        showingQueue = true
-                    } label: {
-                        HStack {
-                            Label("Pending Deletions", systemImage: "trash")
-                            Spacer()
-                            Text("\(pendingItems.count)")
-                                .font(.headline.monospacedDigit())
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .controlSize(.large)
-                    .accessibilityIdentifier("pending-deletions")
-                }
+                reviewActions
+                categoryDashboard
             }
 
         case .notDetermined:
@@ -191,31 +169,265 @@ struct HomeView: View {
         }
     }
 
-    private func startSession() {
-        if configuration.category.requiresClassificationIndex {
-            categoryPreparation = CategoryPreparationRequest(
-                configuration: configuration
-            )
-        } else {
-            launchSession(configuration: configuration)
+    private var reviewActions: some View {
+        VStack(spacing: 14) {
+            Button {
+                launchSession(
+                    request: ReviewRequest(configuration: configuration)
+                )
+            } label: {
+                Label("Start Reviewing", systemImage: "hand.draw")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .accessibilityIdentifier("start-reviewing")
+
+            Button {
+                showingSetup = true
+            } label: {
+                HStack {
+                    Image(systemName: "line.3.horizontal.decrease")
+                    Text(configuration.summary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityLabel("Review setup, \(configuration.summary)")
+            .accessibilityIdentifier("review-setup")
+
+            if !pendingItems.isEmpty {
+                Button {
+                    showingQueue = true
+                } label: {
+                    HStack {
+                        Label("Pending Deletions", systemImage: "trash")
+                        Spacer()
+                        Text("\(pendingItems.count)")
+                            .font(.headline.monospacedDigit())
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .controlSize(.large)
+                .accessibilityIdentifier("pending-deletions")
+            }
         }
     }
 
-    private func launchSession(configuration: ReviewConfiguration) {
+    @ViewBuilder
+    private var categoryDashboard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Review by Category")
+                .font(.title2.bold())
+
+            if dashboard.isLoading, dashboard.metadataBuckets.isEmpty {
+                ProgressView("Loading library details…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let dashboardError = dashboard.errorMessage {
+                Label(dashboardError, systemImage: "exclamationmark.triangle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                bucketGrid(dashboard.metadataBuckets)
+            }
+
+            Divider()
+
+            if hasStartedCategorization {
+                categorizationStatus
+
+                if dashboard.visionBuckets.isEmpty {
+                    Text(
+                        classificationCoordinator.isIndexing
+                            ? "Vision categories will appear here as they’re found."
+                            : "No Vision categories match this review setup yet."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                } else {
+                    bucketGrid(dashboard.visionBuckets)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Discover more categories", systemImage: "sparkles")
+                        .font(.headline)
+                    Text(
+                        "Apple Vision can privately find categories such as pets, food, places, and documents. Results stay on this iPhone."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                    Button("Start Categorizing") {
+                        startCategorization()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("start-categorizing")
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Color.indigo.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+            }
+        }
+    }
+
+    private var categorizationStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(
+                    classificationCoordinator.statusDescription,
+                    systemImage: classificationCoordinator.isIndexing
+                        ? "sparkles"
+                        : "checkmark.circle"
+                )
+                .font(.headline)
+                Spacer()
+                Text("\(dashboard.visionCategoryCount) found")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            if classificationCoordinator.isIndexing {
+                ProgressView(
+                    value: Double(classificationCoordinator.completedCount),
+                    total: Double(max(classificationCoordinator.totalCount, 1))
+                )
+                .progressViewStyle(.linear)
+
+                Text(
+                    "\(classificationCoordinator.completedCount) of \(classificationCoordinator.totalCount) images analyzed"
+                )
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+
+            if classificationCoordinator.deferredCloudCount > 0 {
+                Text(
+                    "\(classificationCoordinator.deferredCloudCount) items are waiting for an iCloud background retry."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func bucketGrid(_ buckets: [CategoryBucket]) -> some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ],
+            spacing: 12
+        ) {
+            ForEach(buckets) { bucket in
+                Button {
+                    launchSession(
+                        request: ReviewRequest(
+                            configuration: configuration,
+                            category: bucket.category
+                        )
+                    )
+                } label: {
+                    CategoryBucketCard(
+                        bucket: bucket,
+                        photoLibrary: photoLibrary
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("category-\(bucket.category.id)")
+            }
+        }
+    }
+
+    private func startCategorization() {
+        do {
+            let repository = ReviewRepository(modelContext: modelContext)
+            try repository.startCategorization()
+            classificationCoordinator.startAutomaticIndexing(
+                repository: repository,
+                photoLibrary: photoLibrary
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func launchSession(request: ReviewRequest) {
         let repository = ReviewRepository(modelContext: modelContext)
         classificationCoordinator.setReviewActive(true)
         activeSession = ReviewSessionModel(
-            configuration: configuration,
+            request: request,
             repository: repository,
             photoLibrary: photoLibrary,
+            classificationCoordinator: classificationCoordinator,
             hapticsEnabled: preference?.hapticsEnabled ?? true
         )
     }
 }
 
-private struct CategoryPreparationRequest: Identifiable {
-    let id = UUID()
-    let configuration: ReviewConfiguration
+private struct CategoryBucketCard: View {
+    let bucket: CategoryBucket
+    let photoLibrary: PhotoLibraryService
+
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay {
+                            Image(systemName: bucket.category.systemImage)
+                                .font(.title)
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .frame(height: 126)
+            .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.78)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bucket.category.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text("\(bucket.count) items")
+                    .font(.caption.monospacedDigit())
+            }
+            .foregroundStyle(.white)
+            .padding(10)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .task(id: bucket.representativeAsset.id) {
+            thumbnail = try? await photoLibrary.thumbnail(
+                identifier: bucket.representativeAsset.id,
+                targetSize: CGSize(width: 360, height: 260)
+            )
+        }
+    }
 }
 
 private struct PermissionCard: View {

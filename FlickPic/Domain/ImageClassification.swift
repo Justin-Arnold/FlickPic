@@ -1,56 +1,61 @@
 import Foundation
 
-enum ContentCategory: String, Codable, CaseIterable, Sendable {
-    case screenshot
-    case receipt
-    case document
-    case otherPhoto
+enum ReviewCategory: Hashable, Identifiable, Sendable {
+    case metadata(MetadataCategory)
+    case vision(String)
+
+    var id: String {
+        switch self {
+        case let .metadata(category):
+            "metadata:\(category.rawValue)"
+        case let .vision(identifier):
+            "vision:\(identifier)"
+        }
+    }
 
     var title: String {
         switch self {
-        case .screenshot: "Screenshot"
-        case .receipt: "Receipt"
-        case .document: "Document"
-        case .otherPhoto: "Other Photo"
+        case let .metadata(category):
+            category.title
+        case let .vision(identifier):
+            VisionTag.displayTitle(for: identifier)
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case let .metadata(category):
+            category.systemImage
+        case .vision:
+            "sparkles"
         }
     }
 }
 
-enum ContentCategoryFilter: String, Codable, CaseIterable, Identifiable, Sendable {
-    case any
-    case screenshots
-    case receipts
-    case documents
-    case otherPhotos
+struct ReviewRequest: Equatable, Sendable {
+    var configuration: ReviewConfiguration
+    var category: ReviewCategory?
 
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .any: "Any"
-        case .screenshots: "Screenshots"
-        case .receipts: "Receipts"
-        case .documents: "Documents"
-        case .otherPhotos: "Other Photos"
-        }
+    init(
+        configuration: ReviewConfiguration,
+        category: ReviewCategory? = nil
+    ) {
+        self.configuration = configuration
+        self.category = category
     }
 
-    var requiresClassificationIndex: Bool {
-        switch self {
-        case .receipts, .documents, .otherPhotos:
+    func matchesCategory(
+        asset: MediaAssetDescriptor,
+        visionTagIdentifiers: Set<String>
+    ) -> Bool {
+        switch category {
+        case nil:
             true
-        case .any, .screenshots:
-            false
-        }
-    }
-
-    var storedCategory: ContentCategory? {
-        switch self {
-        case .any: nil
-        case .screenshots: .screenshot
-        case .receipts: .receipt
-        case .documents: .document
-        case .otherPhotos: .otherPhoto
+        case let .metadata(category):
+            category.matches(asset)
+        case let .vision(identifier):
+            asset.mediaKind == .photo
+                && visionTagIdentifiers.contains(identifier)
         }
     }
 }
@@ -61,16 +66,31 @@ enum ClassificationRecordStatus: String, Codable, Sendable {
     case failed
 }
 
-struct ImageClassificationResult: Equatable, Sendable {
-    let category: ContentCategory
+struct VisionTag: Equatable, Hashable, Sendable {
+    let identifier: String
     let confidence: Float
+
+    var title: String {
+        Self.displayTitle(for: identifier)
+    }
+
+    static func displayTitle(for identifier: String) -> String {
+        identifier
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+}
+
+struct ImageClassificationResult: Equatable, Sendable {
+    let tags: [VisionTag]
     let classifierVersion: Int
 }
 
 struct ClassificationCacheSnapshot: Equatable, Sendable {
     let assetIdentifier: String
-    let category: ContentCategory?
-    let confidence: Float
     let assetModificationDate: Date?
     let classifierVersion: Int
     let status: ClassificationRecordStatus
@@ -83,6 +103,25 @@ struct ClassificationCacheSnapshot: Equatable, Sendable {
         self.classifierVersion == classifierVersion
             && assetModificationDate == descriptor.modificationDate
     }
+}
+
+struct ClassificationIndexUpdate: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case asset
+        case reset
+    }
+
+    let kind: Kind
+    let assetIdentifier: String?
+    let previousTagIdentifiers: Set<String>
+    let tagIdentifiers: Set<String>
+
+    static let reset = ClassificationIndexUpdate(
+        kind: .reset,
+        assetIdentifier: nil,
+        previousTagIdentifiers: [],
+        tagIdentifiers: []
+    )
 }
 
 enum ClassificationImageError: LocalizedError, Equatable {

@@ -16,12 +16,22 @@ struct FlickPicApp: App {
 
     init() {
         let photoLibrary = PhotoLibraryService()
+        #if DEBUG
+        let classificationCoordinator =
+            ProcessInfo.processInfo.arguments.contains("-ui-testing-fixtures")
+                ? ClassificationCoordinator(
+                    classifier: UITestImageClassificationClient()
+                )
+                : ClassificationCoordinator()
+        #else
         let classificationCoordinator = ClassificationCoordinator()
+        #endif
         let schema = Schema([
             ReviewedAsset.self,
             PendingDeletion.self,
             AppPreference.self,
-            AssetClassification.self
+            AssetClassification.self,
+            VisionTagAssignment.self
         ])
         let configuration = ModelConfiguration(
             isStoredInMemoryOnly: ProcessInfo.processInfo.arguments.contains("-ui-testing")

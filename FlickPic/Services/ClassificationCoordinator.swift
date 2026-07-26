@@ -38,9 +38,10 @@ final class ClassificationCoordinator {
     private var automaticRescanRequested = false
     private var lowPowerObserver: NSObjectProtocol?
     private var thermalObserver: NSObjectProtocol?
+    private var updateContinuations:
+        [UUID: AsyncStream<ClassificationIndexUpdate>.Continuation] = [:]
 
     private(set) var isIndexing = false
-    private(set) var isExplicitScan = false
     private(set) var completedCount = 0
     private(set) var totalCount = 0
     private(set) var failedCount = 0
@@ -59,9 +60,6 @@ final class ClassificationCoordinator {
     }
 
     var statusDescription: String {
-        if isReviewActive {
-            return "Paused while reviewing"
-        }
         if ProcessInfo.processInfo.isLowPowerModeEnabled {
             return "Paused by Low Power Mode"
         }
@@ -69,7 +67,9 @@ final class ClassificationCoordinator {
             return "Paused while iPhone cools down"
         }
         if isIndexing {
-            return isExplicitScan ? "Finishing selected category" : "Categorizing on device"
+            return isReviewActive
+                ? "Categorizing while you review"
+                : "Categorizing on device"
         }
         if lastErrorMessage != nil {
             return "Needs attention"
@@ -109,6 +109,18 @@ final class ClassificationCoordinator {
         }
     }
 
+    func updates() -> AsyncStream<ClassificationIndexUpdate> {
+        let identifier = UUID()
+        return AsyncStream { [weak self] continuation in
+            self?.updateContinuations[identifier] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateContinuations.removeValue(forKey: identifier)
+                }
+            }
+        }
+    }
+
     func startAutomaticIndexing(
         repository: ReviewRepository,
         photoLibrary: any PhotoLibraryClient
@@ -117,7 +129,6 @@ final class ClassificationCoordinator {
         currentPhotoLibrary = photoLibrary
 
         guard photoLibrary.authorizationState.canReadLibrary,
-              !isReviewActive,
               !isSystemConstrained else {
             return
         }
@@ -127,7 +138,6 @@ final class ClassificationCoordinator {
         }
 
         automaticRescanRequested = false
-        isExplicitScan = false
         let workID = UUID()
         self.workID = workID
         let task = Task { @MainActor [weak self] in
@@ -162,7 +172,6 @@ final class ClassificationCoordinator {
         photoLibrary: any PhotoLibraryClient
     ) async -> ClassificationScanOutcome {
         guard photoLibrary.authorizationState.canReadLibrary,
-              !isReviewActive,
               !isSystemConstrained else {
             return ClassificationScanOutcome(
                 wasCanceled: false,
@@ -181,11 +190,7 @@ final class ClassificationCoordinator {
                 reconcileEntireLibrary: true
             )
         } catch is CancellationError {
-            return ClassificationScanOutcome(
-                wasCanceled: true,
-                wasPausedBySystem: false,
-                failedCount: failedCount
-            )
+            return canceledOutcome
         } catch {
             let message = error.localizedDescription
             lastErrorMessage = message
@@ -198,87 +203,12 @@ final class ClassificationCoordinator {
         }
     }
 
-    func prepareCategory(
-        configuration: ReviewConfiguration,
-        repository: ReviewRepository,
-        photoLibrary: any PhotoLibraryClient
-    ) async -> ClassificationScanOutcome {
-        currentRepository = repository
-        currentPhotoLibrary = photoLibrary
-        await stopCurrentWork()
-
-        guard !isSystemConstrained else {
-            return ClassificationScanOutcome(
-                wasCanceled: false,
-                wasPausedBySystem: true,
-                failedCount: failedCount
-            )
-        }
-
-        isExplicitScan = true
-        let workID = UUID()
-        self.workID = workID
-        let task = Task { @MainActor [weak self] in
-            guard let self else {
-                return ClassificationScanOutcome(
-                    wasCanceled: true,
-                    wasPausedBySystem: false,
-                    failedCount: 0
-                )
-            }
-
-            do {
-                let reviewed = try repository.reviewedIdentifiers()
-                let pending = try repository.pendingIdentifiers()
-                var candidateConfiguration = configuration
-                candidateConfiguration.category = .any
-                candidateConfiguration.mediaFilter = .photos
-                let assets = try await photoLibrary.fetchAssets(
-                    configuration: candidateConfiguration,
-                    reviewedIdentifiers: reviewed,
-                    pendingIdentifiers: pending
-                )
-                return await runIndex(
-                    assets: assets,
-                    repository: repository,
-                    photoLibrary: photoLibrary,
-                    allowNetworkAccess: true,
-                    reconcileEntireLibrary: false
-                )
-            } catch is CancellationError {
-                return ClassificationScanOutcome(
-                    wasCanceled: true,
-                    wasPausedBySystem: false,
-                    failedCount: failedCount
-                )
-            } catch {
-                let message = error.localizedDescription
-                lastErrorMessage = message
-                return ClassificationScanOutcome(
-                    wasCanceled: false,
-                    wasPausedBySystem: false,
-                    failedCount: failedCount,
-                    errorMessage: message
-                )
-            }
-        }
-        workTask = task
-        let outcome = await task.value
-        if self.workID == workID {
-            workTask = nil
-            self.workID = nil
-        }
-        restartQueuedAutomaticIndexing()
-        return outcome
-    }
-
     func runBackgroundIndexing(
         repository: ReviewRepository,
         photoLibrary: any PhotoLibraryClient
     ) async -> Bool {
         guard photoLibrary.authorizationState.canReadLibrary else { return true }
         await stopCurrentWork()
-        isExplicitScan = false
 
         do {
             let assets = try await photoLibrary.classifiableAssets()
@@ -305,13 +235,8 @@ final class ClassificationCoordinator {
 
     func setReviewActive(_ active: Bool) {
         isReviewActive = active
-        if active {
-            cancelCurrentWork()
-        } else {
-            Task { @MainActor [weak self] in
-                await self?.waitForCurrentWork()
-                self?.restartAutomaticIndexingIfPossible()
-            }
+        if !active, workTask == nil {
+            restartAutomaticIndexingIfPossible()
         }
     }
 
@@ -333,6 +258,7 @@ final class ClassificationCoordinator {
         deferredCloudCount = 0
         lastCompletedAt = nil
         lastErrorMessage = nil
+        publish(.reset)
         restartAutomaticIndexingIfPossible()
     }
 
@@ -349,7 +275,9 @@ final class ClassificationCoordinator {
 
         isIndexing = true
         completedCount = 0
+        totalCount = assets.count
         failedCount = 0
+        deferredCloudCount = 0
         lastErrorMessage = nil
 
         var scanErrorMessage: String?
@@ -363,35 +291,17 @@ final class ClassificationCoordinator {
                     for identifier in missing {
                         snapshots.removeValue(forKey: identifier)
                     }
+                    publish(.reset)
                 }
             }
 
             var queuedAssets: [MediaAssetDescriptor] = []
             queuedAssets.reserveCapacity(min(assets.count, 1_000))
-            deferredCloudCount = 0
 
             for asset in assets {
                 guard !Task.isCancelled else {
                     isIndexing = false
                     return canceledOutcome
-                }
-
-                if asset.isScreenshot {
-                    let snapshot = snapshots[asset.id]
-                    if snapshot?.isCurrent(
-                        for: asset,
-                        classifierVersion: classifier.classifierVersion
-                    ) != true || snapshot?.category != .screenshot {
-                        try repository.saveClassification(
-                            identifier: asset.id,
-                            category: .screenshot,
-                            confidence: 1,
-                            modificationDate: asset.modificationDate,
-                            classifierVersion: classifier.classifierVersion,
-                            status: .classified
-                        )
-                    }
-                    continue
                 }
 
                 if let snapshot = snapshots[asset.id],
@@ -400,22 +310,28 @@ final class ClassificationCoordinator {
                     classifierVersion: classifier.classifierVersion
                    ) {
                     switch snapshot.status {
-                    case .classified, .failed:
-                        if snapshot.status == .failed {
-                            failedCount += 1
-                        }
+                    case .classified:
+                        completedCount += 1
+                        continue
+                    case .failed:
+                        completedCount += 1
+                        failedCount += 1
                         continue
                     case .deferredCloud where !allowNetworkAccess:
+                        completedCount += 1
                         deferredCloudCount += 1
                         continue
                     case .deferredCloud:
                         break
                     }
+                } else if let update = try repository.clearVisionTags(
+                    identifier: asset.id
+                ) {
+                    publish(update)
                 }
                 queuedAssets.append(asset)
             }
 
-            totalCount = queuedAssets.count
             var index = 0
             while index < queuedAssets.count {
                 guard !Task.isCancelled else {
@@ -423,7 +339,7 @@ final class ClassificationCoordinator {
                     return canceledOutcome
                 }
 
-                if !isExplicitScan && isSystemConstrained {
+                if isSystemConstrained {
                     isIndexing = false
                     return ClassificationScanOutcome(
                         wasCanceled: false,
@@ -432,30 +348,32 @@ final class ClassificationCoordinator {
                     )
                 }
 
-                let firstAsset = queuedAssets[index]
-                if index + 1 < queuedAssets.count {
+                let batchSize = isReviewActive ? 1 : 2
+                if batchSize == 2, index + 1 < queuedAssets.count {
+                    let firstAsset = queuedAssets[index]
                     let secondAsset = queuedAssets[index + 1]
-                    async let first = attemptClassification(
+                    async let firstAttempt = attemptClassification(
                         asset: firstAsset,
                         photoLibrary: photoLibrary,
                         allowNetworkAccess: allowNetworkAccess
                     )
-                    async let second = attemptClassification(
+                    async let secondAttempt = attemptClassification(
                         asset: secondAsset,
                         photoLibrary: photoLibrary,
                         allowNetworkAccess: allowNetworkAccess
                     )
-                    let attempts = await [first, second]
-                    for attempt in attempts {
-                        try persist(
-                            attempt: attempt,
-                            repository: repository
-                        )
-                    }
+                    try persist(
+                        attempt: await firstAttempt,
+                        repository: repository
+                    )
+                    try persist(
+                        attempt: await secondAttempt,
+                        repository: repository
+                    )
                     index += 2
                 } else {
                     let attempt = await attemptClassification(
-                        asset: firstAsset,
+                        asset: queuedAssets[index],
                         photoLibrary: photoLibrary,
                         allowNetworkAccess: allowNetworkAccess
                     )
@@ -511,40 +429,39 @@ final class ClassificationCoordinator {
         attempt: Attempt,
         repository: ReviewRepository
     ) throws {
+        let update: ClassificationIndexUpdate
         switch attempt {
         case let .classified(asset, result):
-            try repository.saveClassification(
+            update = try repository.saveClassification(
                 identifier: asset.id,
-                category: result.category,
-                confidence: result.confidence,
+                tags: result.tags,
                 modificationDate: asset.modificationDate,
                 classifierVersion: result.classifierVersion,
                 status: .classified
             )
         case let .deferredCloud(asset):
-            try repository.saveClassification(
+            update = try repository.saveClassification(
                 identifier: asset.id,
-                category: nil,
-                confidence: 0,
+                tags: [],
                 modificationDate: asset.modificationDate,
                 classifierVersion: classifier.classifierVersion,
                 status: .deferredCloud
             )
             deferredCloudCount += 1
         case let .failed(asset):
-            try repository.saveClassification(
+            update = try repository.saveClassification(
                 identifier: asset.id,
-                category: nil,
-                confidence: 0,
+                tags: [],
                 modificationDate: asset.modificationDate,
                 classifierVersion: classifier.classifierVersion,
                 status: .failed
             )
             failedCount += 1
         case .canceled:
-            break
+            return
         }
         completedCount += 1
+        publish(update)
     }
 
     private var canceledOutcome: ClassificationScanOutcome {
@@ -568,6 +485,12 @@ final class ClassificationCoordinator {
             false
         @unknown default:
             true
+        }
+    }
+
+    private func publish(_ update: ClassificationIndexUpdate) {
+        for continuation in updateContinuations.values {
+            continuation.yield(update)
         }
     }
 
