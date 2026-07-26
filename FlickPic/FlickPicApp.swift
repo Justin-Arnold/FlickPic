@@ -6,12 +6,55 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct FlickPicApp: App {
+    private let modelContainer: ModelContainer
+    @State private var photoLibrary: PhotoLibraryService
+    @State private var classificationCoordinator: ClassificationCoordinator
+
+    init() {
+        let photoLibrary = PhotoLibraryService()
+        let classificationCoordinator = ClassificationCoordinator()
+        let schema = Schema([
+            ReviewedAsset.self,
+            PendingDeletion.self,
+            AppPreference.self,
+            AssetClassification.self
+        ])
+        let configuration = ModelConfiguration(
+            isStoredInMemoryOnly: ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        )
+
+        do {
+            modelContainer = try ModelContainer(
+                for: schema,
+                configurations: configuration
+            )
+        } catch {
+            fatalError("Unable to create FlickPic data store: \(error)")
+        }
+
+        _photoLibrary = State(initialValue: photoLibrary)
+        _classificationCoordinator = State(initialValue: classificationCoordinator)
+
+        let container = modelContainer
+        ClassificationBackgroundScheduler.shared.register {
+            await classificationCoordinator.runBackgroundIndexing(
+                repository: ReviewRepository(modelContext: container.mainContext),
+                photoLibrary: photoLibrary
+            )
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(
+                photoLibrary: photoLibrary,
+                classificationCoordinator: classificationCoordinator
+            )
         }
+        .modelContainer(modelContainer)
     }
 }
