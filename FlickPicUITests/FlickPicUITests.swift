@@ -180,9 +180,11 @@ final class FlickPicUITests: XCTestCase {
                 .waitForExistence(timeout: 3)
         )
 
-        let inspect = app.buttons["inspect-details"]
-        XCTAssertTrue(inspect.waitForExistence(timeout: 3))
-        inspect.tap()
+        XCTAssertFalse(app.buttons["inspect-details"].exists)
+        let inspectableMedia = app.descendants(matching: .any)["inspectable-media"]
+        XCTAssertTrue(inspectableMedia.waitForExistence(timeout: 3))
+        XCTAssertTrue(inspectableMedia.isHittable)
+        inspectableMedia.doubleTap()
 
         let fit = app.buttons["Fit whole image"]
         let zoomIn = app.buttons["Zoom in"]

@@ -78,6 +78,12 @@ struct MediaCardView: View {
                             isPlaying: $isPlayingLivePhoto
                         )
                     )
+                    .modifier(
+                        PhotoInspectionGesture(
+                            isEnabled: asset.mediaKind == .photo,
+                            onInspect: inspectPhoto
+                        )
+                    )
                 } else if isLoading {
                     ProgressView()
                         .tint(.white)
@@ -116,23 +122,6 @@ struct MediaCardView: View {
                 metadataBadges
                     .padding(14)
             }
-            .overlay(alignment: .topTrailing) {
-                if image != nil, asset.mediaKind == .photo {
-                    Button {
-                        showingInspector = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.black.opacity(0.58), in: Circle())
-                    }
-                    .accessibilityLabel("Inspect photo details")
-                    .accessibilityHint("Opens pinch-to-zoom photo inspection.")
-                    .accessibilityIdentifier("inspect-details")
-                    .padding(14)
-                }
-            }
             .overlay(alignment: .bottomLeading) {
                 if let creationDate = asset.creationDate {
                     Text(creationDate.formatted(date: .abbreviated, time: .shortened))
@@ -158,10 +147,11 @@ struct MediaCardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityDescription)
+        .accessibilityIdentifier(
+            asset.mediaKind == .photo ? "inspectable-media" : "media-card"
+        )
         .accessibilityAction(named: "Inspect Details") {
-            if image != nil, asset.mediaKind == .photo {
-                showingInspector = true
-            }
+            inspectPhoto()
         }
     }
 
@@ -272,6 +262,11 @@ struct MediaCardView: View {
             isLoadingVideo = false
         }
     }
+
+    private func inspectPhoto() {
+        guard image != nil, asset.mediaKind == .photo else { return }
+        showingInspector = true
+    }
 }
 
 private struct MediaLoadRequest: Equatable {
@@ -293,6 +288,20 @@ private struct LivePhotoPreviewGesture: ViewModifier {
                 },
                 perform: {}
             )
+        } else {
+            content
+        }
+    }
+}
+
+private struct PhotoInspectionGesture: ViewModifier {
+    let isEnabled: Bool
+    let onInspect: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.onTapGesture(count: 2, perform: onInspect)
         } else {
             content
         }
