@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import Photos
+import UniformTypeIdentifiers
 
 enum MediaKind: Int, Codable, CaseIterable, Identifiable, Sendable {
     case photo = 1
@@ -26,6 +27,12 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
     let isFavorite: Bool
     let isScreenshot: Bool
     let isLivePhoto: Bool
+    let isGIF: Bool
+    let isScreenRecording: Bool
+    let isPanorama: Bool
+    let isPortrait: Bool
+    let isSlowMotion: Bool
+    let isTimeLapse: Bool
 
     nonisolated init(
         id: String,
@@ -37,7 +44,13 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
         duration: TimeInterval,
         isFavorite: Bool,
         isScreenshot: Bool,
-        isLivePhoto: Bool
+        isLivePhoto: Bool,
+        isGIF: Bool = false,
+        isScreenRecording: Bool = false,
+        isPanorama: Bool = false,
+        isPortrait: Bool = false,
+        isSlowMotion: Bool = false,
+        isTimeLapse: Bool = false
     ) {
         self.id = id
         self.mediaKind = mediaKind
@@ -49,6 +62,12 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
         self.isFavorite = isFavorite
         self.isScreenshot = isScreenshot
         self.isLivePhoto = isLivePhoto
+        self.isGIF = isGIF
+        self.isScreenRecording = isScreenRecording
+        self.isPanorama = isPanorama
+        self.isPortrait = isPortrait
+        self.isSlowMotion = isSlowMotion
+        self.isTimeLapse = isTimeLapse
     }
 
     nonisolated init?(asset: PHAsset) {
@@ -66,7 +85,16 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
             duration: asset.duration,
             isFavorite: asset.isFavorite,
             isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
-            isLivePhoto: asset.mediaSubtypes.contains(.photoLive)
+            isLivePhoto: asset.mediaSubtypes.contains(.photoLive),
+            isGIF: asset.mediaType == .image
+                && PHAssetResource.assetResources(for: asset).contains {
+                    UTType($0.uniformTypeIdentifier)?.conforms(to: .gif) == true
+                },
+            isScreenRecording: asset.mediaSubtypes.contains(.videoScreenRecording),
+            isPanorama: asset.mediaSubtypes.contains(.photoPanorama),
+            isPortrait: asset.mediaSubtypes.contains(.photoDepthEffect),
+            isSlowMotion: asset.mediaSubtypes.contains(.videoHighFrameRate),
+            isTimeLapse: asset.mediaSubtypes.contains(.videoTimelapse)
         )
     }
 }
