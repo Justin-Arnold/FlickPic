@@ -38,7 +38,7 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
-    func testCategorySelectionForcesPhotosWithoutHidingOtherFilters() throws {
+    func testMetadataBucketsAppearBeforeVisionStarts() throws {
         let app = XCUIApplication()
         app.launchArguments += [
             "-ui-testing",
@@ -47,21 +47,40 @@ final class FlickPicUITests: XCTestCase {
         ]
         app.launch()
 
-        let setup = app.buttons["review-setup"]
-        XCTAssertTrue(setup.waitForExistence(timeout: 3))
-        setup.tap()
+        XCTAssertTrue(
+            app.buttons["category-metadata:images"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["category-metadata:videos"].exists)
+        XCTAssertTrue(app.buttons["category-metadata:gifs"].exists)
+        XCTAssertTrue(app.buttons["category-metadata:screenshots"].exists)
+        XCTAssertTrue(app.buttons["start-categorizing"].exists)
+        XCTAssertFalse(app.buttons["category-vision:dog"].exists)
+    }
 
-        let category = app.descendants(matching: .any)["category-filter"]
-        XCTAssertTrue(category.waitForExistence(timeout: 3))
-        category.tap()
-        app.buttons["Receipts"].tap()
+    @MainActor
+    func testVisionBucketOpensWhileAnotherMatchIsStillArriving() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
 
-        let media = app.descendants(matching: .any)["media-filter"]
-        XCTAssertTrue(media.exists)
-        XCTAssertTrue(media.label.contains("Photos"))
-        XCTAssertFalse(media.isEnabled)
-        XCTAssertTrue(app.descendants(matching: .any)["scope-filter"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["review-order"].exists)
+        let start = app.buttons["start-categorizing"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let dogs = app.buttons["category-vision:dog"]
+        XCTAssertTrue(dogs.waitForExistence(timeout: 3))
+        dogs.tap()
+
+        XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts["1 of 2"].waitForExistence(timeout: 8),
+            "The active deck should grow when the second Vision result arrives."
+        )
     }
 
     @MainActor

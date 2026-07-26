@@ -13,8 +13,9 @@ the user reviews that queue and confirms the PhotoKit deletion request.
 - No goals, streaks, achievements, reminders, or engagement mechanics.
 - Review history, the deletion queue, and the derived category index stay
   on-device with SwiftData.
-- Screenshots use exact PhotoKit metadata. Receipts and documents use Apple
-  Vision image classification on small image representations.
+- Media types and facets such as GIFs, Live Photos, screenshots, panoramas,
+  and screen recordings use PhotoKit metadata. Optional dynamic categories use
+  Apple Vision image classification on small image representations.
 - OCR uses Apple Vision on-device.
 - Animated GIFs play in the review deck and zoomable inspector.
 - Sharing occurs only through an explicit system share sheet.
@@ -22,19 +23,22 @@ the user reviews that queue and confirms the PhotoKit deletion request.
 
 ## On-device categories
 
-Session setup can combine its date/review scope with a separate category:
-Any, Screenshots, Receipts, Documents, or Other Photos. The categories are
-exclusive in that order of priority.
+The home dashboard derives overlapping metadata buckets immediately and applies
+the current review setup to their counts. After the user chooses Start
+Categorizing, Apple Vision discovers arbitrary high-confidence tags. An image
+can appear in several Vision categories, and category cards update as results
+are saved.
 
-FlickPic builds its private category index while the app is open and idle. It
-uses local image data first, pauses during review sessions, Low Power Mode, and
-serious thermal pressure, and may resume eligible work with an iOS background
-processing task. Selecting an AI category explicitly retries small iCloud
-representations with visible, cancellable progress.
+The private Vision index runs incrementally while the app is active. It uses
+local image data first, reduces concurrency while a review deck is open, pauses
+for Low Power Mode or serious thermal pressure, and may retry iCloud-backed
+images with an iOS background processing task. A category deck can be opened
+before the scan finishes and adds new matching images without replacing the
+current card.
 
-The cache stores only the asset identifier, derived category, confidence,
-asset modification date, classifier version, status, and last-attempt date. It
-does not store thumbnails, OCR text, embeddings, or Vision's full taxonomy.
+The cache stores only asset identifiers, Vision tag identifiers and confidence,
+asset modification dates, classifier version, status, and last-attempt date. It
+does not store thumbnails, OCR text, or embeddings.
 
 ## Requirements
 
