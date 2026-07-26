@@ -84,7 +84,7 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
-    func testCompletingGIFDeckDoesNotShowCancellationError() throws {
+    func testGIFDeckCanOpenAndConfirmPendingDeletions() throws {
         let app = XCUIApplication()
         app.launchArguments += [
             "-ui-testing",
@@ -99,7 +99,7 @@ final class FlickPicUITests: XCTestCase {
         gifs.tap()
 
         XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 3))
-        app.buttons["Keep"].tap()
+        app.buttons["Delete"].tap()
         XCTAssertTrue(
             app.staticTexts["Nothing to Review"].waitForExistence(timeout: 3)
         )
@@ -113,6 +113,20 @@ final class FlickPicUITests: XCTestCase {
                 .matching(NSPredicate(format: "label CONTAINS 'CancellationError'"))
                 .firstMatch
                 .waitForExistence(timeout: 2)
+        )
+
+        let pending = app.buttons["pending-deletions"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 3))
+        XCTAssertTrue(pending.isHittable)
+        pending.tap()
+
+        let confirmDeletion = app.buttons["Delete 1 Items"]
+        XCTAssertTrue(confirmDeletion.waitForExistence(timeout: 3))
+        confirmDeletion.tap()
+        app.alerts["Delete these items?"].buttons["Continue"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Deletion Queue Is Empty"]
+                .waitForExistence(timeout: 3)
         )
     }
 

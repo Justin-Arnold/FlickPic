@@ -501,6 +501,7 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
         }
         guard !identifiers.isEmpty else { return [] }
         let request = PhotoDeletionRequest(identifiers: identifiers)
+        guard !request.resolvedIdentifiers.isEmpty else { return [] }
         try await PHPhotoLibrary.shared().performChanges {
             request.performChange()
         }
@@ -640,31 +641,24 @@ private final class PhotoRequestCancellation: @unchecked Sendable {
 }
 
 private final class PhotoDeletionRequest: @unchecked Sendable {
-    private let identifiers: [String]
-    private let lock = NSLock()
-    private var storedResolvedIdentifiers: Set<String> = []
+    private let assets: [PHAsset]
+    let resolvedIdentifiers: Set<String>
 
     init(identifiers: [String]) {
-        self.identifiers = identifiers
-    }
-
-    var resolvedIdentifiers: Set<String> {
-        lock.withLock { storedResolvedIdentifiers }
-    }
-
-    func performChange() {
-        let assets = PHAsset.fetchAssets(
+        let result = PHAsset.fetchAssets(
             withLocalIdentifiers: identifiers,
             options: nil
         )
-        var resolved: Set<String> = []
-        assets.enumerateObjects { asset, _, _ in
-            resolved.insert(asset.localIdentifier)
+        var assets: [PHAsset] = []
+        assets.reserveCapacity(result.count)
+        result.enumerateObjects { asset, _, _ in
+            assets.append(asset)
         }
-        lock.withLock {
-            storedResolvedIdentifiers = resolved
-        }
-        guard assets.count > 0 else { return }
-        PHAssetChangeRequest.deleteAssets(assets)
+        self.assets = assets
+        self.resolvedIdentifiers = Set(assets.map(\.localIdentifier))
+    }
+
+    func performChange() {
+        PHAssetChangeRequest.deleteAssets(assets as NSArray)
     }
 }
