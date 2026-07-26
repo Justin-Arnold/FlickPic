@@ -1,8 +1,10 @@
 #if DEBUG
 @preconcurrency import AVFoundation
 import Foundation
+import ImageIO
 @preconcurrency import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class UITestPhotoLibraryClient: PhotoLibraryClient {
@@ -135,6 +137,10 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         try fixtureImage(identifier: identifier, targetSize: targetSize)
     }
 
+    func gifData(identifier: String) async throws -> Data? {
+        identifier == "ui-photo-1" ? Self.fixtureGIFData : nil
+    }
+
     func livePhoto(
         identifier: String,
         targetSize: CGSize
@@ -180,8 +186,14 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
             at: directory,
             withIntermediateDirectories: true
         )
-        let file = directory.appendingPathComponent("\(identifier).jpg")
-        try Data("FlickPic UI fixture".utf8).write(to: file)
+        let fileExtension = identifier == "ui-photo-1" ? "gif" : "jpg"
+        let file = directory.appendingPathComponent(
+            "\(identifier).\(fileExtension)"
+        )
+        let data = identifier == "ui-photo-1"
+            ? Self.fixtureGIFData ?? Data()
+            : Data("FlickPic UI fixture".utf8)
+        try data.write(to: file)
         return PreparedMediaExport(
             directoryURL: directory,
             itemURLs: [file]
@@ -238,5 +250,50 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
             )
         }
     }
+
+    private static let fixtureGIFData: Data? = {
+        let size = CGSize(width: 160, height: 200)
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            UTType.gif.identifier as CFString,
+            2,
+            nil
+        ) else {
+            return nil
+        }
+
+        let fileProperties: [CFString: Any] = [
+            kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFLoopCount: 0
+            ] as [CFString: Any]
+        ]
+        CGImageDestinationSetProperties(
+            destination,
+            fileProperties as CFDictionary
+        )
+
+        for color in [UIColor.systemIndigo, UIColor.systemPink] {
+            let image = UIGraphicsImageRenderer(size: size).image { context in
+                color.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+            }
+            guard let cgImage = image.cgImage else { return nil }
+            let frameProperties: [CFString: Any] = [
+                kCGImagePropertyGIFDictionary: [
+                    kCGImagePropertyGIFDelayTime: 0.2,
+                    kCGImagePropertyGIFUnclampedDelayTime: 0.2
+                ] as [CFString: Any]
+            ]
+            CGImageDestinationAddImage(
+                destination,
+                cgImage,
+                frameProperties as CFDictionary
+            )
+        }
+
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }()
 }
 #endif

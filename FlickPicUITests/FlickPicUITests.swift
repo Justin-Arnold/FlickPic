@@ -80,6 +80,10 @@ final class FlickPicUITests: XCTestCase {
 
         let initialPosition = app.staticTexts["1 of 3"]
         XCTAssertTrue(initialPosition.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["animated-gif-badge"]
+                .waitForExistence(timeout: 3)
+        )
 
         let inspect = app.buttons["inspect-details"]
         XCTAssertTrue(inspect.waitForExistence(timeout: 3))

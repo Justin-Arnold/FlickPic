@@ -27,6 +27,7 @@ protocol PhotoLibraryClient: AnyObject, Sendable {
         identifier: String,
         targetSize: CGSize
     ) async throws -> UIImage
+    func gifData(identifier: String) async throws -> Data?
     func livePhoto(
         identifier: String,
         targetSize: CGSize

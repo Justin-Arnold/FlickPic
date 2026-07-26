@@ -3,16 +3,19 @@ import Observation
 @preconcurrency import Photos
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 
 @Observable
 @MainActor
 final class PhotoLibraryService: NSObject, PhotoLibraryClient {
     private let imageManager = PHCachingImageManager()
     private let imageCache = NSCache<NSString, UIImage>()
+    private let gifDataCache = NSCache<NSString, NSData>()
     private let catalog = PhotoKitCatalog()
     private let overrideClient: (any PhotoLibraryClient)?
     private let usesUITestAuthorizationOverride: Bool
     private var cachedAssets: [PHAsset] = []
+    private var nonGIFIdentifiers: Set<String> = []
     private var isObservingLibrary = false
 
     private(set) var authorizationState: AuthorizationState
@@ -38,6 +41,7 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
                 from: PHPhotoLibrary.authorizationStatus(for: .readWrite)
             ))
         super.init()
+        gifDataCache.totalCostLimit = 64 * 1_024 * 1_024
         cleanTemporaryExports()
         if authorizationState.canReadLibrary && !usesUITestAuthorizationOverride {
             beginObservingLibraryIfNeeded()
@@ -206,6 +210,85 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
                 }
             }
         }
+    }
+
+    func gifData(identifier: String) async throws -> Data? {
+        if let overrideClient {
+            return try await overrideClient.gifData(identifier: identifier)
+        }
+
+        let cacheKey = identifier as NSString
+        if let cached = gifDataCache.object(forKey: cacheKey) {
+            return cached as Data
+        }
+        guard !nonGIFIdentifiers.contains(identifier) else { return nil }
+
+        let asset = try asset(identifier: identifier)
+        guard asset.mediaType == .image else {
+            nonGIFIdentifiers.insert(identifier)
+            return nil
+        }
+
+        let isGIF = PHAssetResource.assetResources(for: asset).contains {
+            UTType($0.uniformTypeIdentifier)?.conforms(to: .gif) == true
+        }
+        guard isGIF else {
+            nonGIFIdentifiers.insert(identifier)
+            return nil
+        }
+
+        let options = PHImageRequestOptions()
+        options.version = .original
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+
+        let cancellation = PhotoRequestCancellation()
+        let data: Data = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let requestID = imageManager.requestImageDataAndOrientation(
+                    for: asset,
+                    options: options
+                ) { data, typeIdentifier, _, info in
+                    guard cancellation.claimCompletion() else { return }
+
+                    if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(throwing: error)
+                    } else if (info?[PHImageCancelledKey] as? Bool) == true {
+                        continuation.resume(throwing: CancellationError())
+                    } else if let data {
+                        if let typeIdentifier,
+                           UTType(typeIdentifier)?.conforms(to: .gif) != true {
+                            continuation.resume(
+                                throwing: PhotoLibraryError.gifUnavailable
+                            )
+                        } else {
+                            continuation.resume(returning: data)
+                        }
+                    } else {
+                        continuation.resume(
+                            throwing: PhotoLibraryError.gifUnavailable
+                        )
+                    }
+                }
+                cancellation.set(requestID)
+                if Task.isCancelled {
+                    imageManager.cancelImageRequest(requestID)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                if let requestID = cancellation.requestID {
+                    self?.imageManager.cancelImageRequest(requestID)
+                }
+            }
+        }
+
+        gifDataCache.setObject(
+            data as NSData,
+            forKey: cacheKey,
+            cost: data.count
+        )
+        return data
     }
 
     func livePhoto(
@@ -471,6 +554,8 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in
             self?.imageCache.removeAllObjects()
+            self?.gifDataCache.removeAllObjects()
+            self?.nonGIFIdentifiers.removeAll()
             self?.changeVersion += 1
         }
     }

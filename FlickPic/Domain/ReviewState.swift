@@ -27,6 +27,7 @@ enum AssetReviewState: Equatable, Sendable {
 enum PhotoLibraryError: LocalizedError {
     case assetUnavailable
     case imageUnavailable
+    case gifUnavailable
     case exportResourceUnavailable
     case livePhotoExportUnsupported
     case noRecognizedText
@@ -35,6 +36,7 @@ enum PhotoLibraryError: LocalizedError {
         switch self {
         case .assetUnavailable: "This item is no longer available in the Photos library."
         case .imageUnavailable: "FlickPic could not load this item."
+        case .gifUnavailable: "FlickPic could not load this animated GIF."
         case .exportResourceUnavailable: "FlickPic could not prepare a shareable copy."
         case .livePhotoExportUnsupported:
             "FlickPic cannot yet preserve a complete Live Photo when sharing a copy."

@@ -6,16 +6,28 @@ struct ImageInspectorView: View {
 
     let asset: MediaAssetDescriptor
     let initialImage: UIImage?
+    let initialGIFAnimation: GIFAnimation?
     let photoLibrary: any PhotoLibraryClient
 
     @State private var detailedImage: UIImage?
+    @State private var detailedGIFAnimation: GIFAnimation?
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var retryToken = UUID()
     @State private var zoomController = ImageZoomController()
 
     private var displayedImage: UIImage? {
-        detailedImage ?? initialImage
+        if detailedGIFAnimation != nil {
+            return detailedImage ?? initialImage
+        }
+        if initialGIFAnimation != nil {
+            return initialImage ?? detailedImage
+        }
+        return detailedImage ?? initialImage
+    }
+
+    private var displayedGIFAnimation: GIFAnimation? {
+        detailedGIFAnimation ?? initialGIFAnimation
     }
 
     var body: some View {
@@ -25,10 +37,15 @@ struct ImageInspectorView: View {
             if let displayedImage {
                 ZoomableImageView(
                     image: displayedImage,
+                    animation: displayedGIFAnimation,
                     controller: zoomController
                 )
                 .ignoresSafeArea()
-                .accessibilityLabel("Zoomable photo detail")
+                .accessibilityLabel(
+                    displayedGIFAnimation == nil
+                        ? "Zoomable photo detail"
+                        : "Zoomable animated GIF detail"
+                )
             }
 
             if displayedImage == nil, isLoading {
@@ -134,6 +151,14 @@ struct ImageInspectorView: View {
     private func loadDetail() async {
         isLoading = true
         errorMessage = nil
+        detailedGIFAnimation = nil
+
+        // The card already decoded this animation at screen scale. Reuse those
+        // frames so opening the inspector does not double the GIF memory cost.
+        guard initialGIFAnimation == nil else {
+            isLoading = false
+            return
+        }
 
         do {
             let image = try await photoLibrary.inspectionImage(
@@ -142,6 +167,24 @@ struct ImageInspectorView: View {
             )
             try Task.checkCancellation()
             detailedImage = image
+
+            if let data = try await photoLibrary.gifData(
+                identifier: asset.id
+            ) {
+                let targetSize = InspectionImageSizing.targetSize(for: asset)
+                let animation = try await GIFAnimationDecoder.decode(
+                    data: data,
+                    maximumPixelDimension: max(
+                        targetSize.width,
+                        targetSize.height
+                    )
+                )
+                try Task.checkCancellation()
+                if animation.frameCount > 1 {
+                    detailedGIFAnimation = animation
+                    detailedImage = animation.posterImage
+                }
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -201,18 +244,20 @@ private final class ImageZoomController {
 
 private struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    let animation: GIFAnimation?
     let controller: ImageZoomController
 
     func makeUIView(context: Context) -> ZoomingImageScrollView {
         let view = ZoomingImageScrollView()
-        view.setImage(image)
+        view.setImage(image, animation: animation)
         controller.scrollView = view
         return view
     }
 
     func updateUIView(_ view: ZoomingImageScrollView, context: Context) {
-        if view.image !== image {
-            view.setImage(image)
+        if view.image !== image
+            || view.animationID != animation?.id {
+            view.setImage(image, animation: animation)
         }
         controller.scrollView = view
     }
@@ -221,6 +266,7 @@ private struct ZoomableImageView: UIViewRepresentable {
         _ view: ZoomingImageScrollView,
         coordinator: Void
     ) {
+        view.stopAnimating()
         view.image = nil
     }
 }
@@ -229,6 +275,7 @@ private struct ZoomableImageView: UIViewRepresentable {
 private final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
     private let imageView = UIImageView()
     private var lastBoundsSize: CGSize = .zero
+    fileprivate private(set) var animationID: UUID?
     fileprivate var image: UIImage? {
         get { imageView.image }
         set { imageView.image = newValue }
@@ -269,10 +316,24 @@ private final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
         configureZoomScales(reset: true)
     }
 
-    func setImage(_ image: UIImage) {
+    func setImage(
+        _ image: UIImage,
+        animation: GIFAnimation?
+    ) {
         self.image = image
+        animationID = animation?.id
+        if let animation {
+            GIFLayerAnimator.apply(animation, to: imageView.layer)
+        } else {
+            GIFLayerAnimator.remove(from: imageView.layer)
+        }
         lastBoundsSize = .zero
         setNeedsLayout()
+    }
+
+    func stopAnimating() {
+        animationID = nil
+        GIFLayerAnimator.remove(from: imageView.layer)
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {

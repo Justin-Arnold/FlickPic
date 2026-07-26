@@ -16,6 +16,7 @@ the user reviews that queue and confirms the PhotoKit deletion request.
 - Screenshots use exact PhotoKit metadata. Receipts and documents use Apple
   Vision image classification on small image representations.
 - OCR uses Apple Vision on-device.
+- Animated GIFs play in the review deck and zoomable inspector.
 - Sharing occurs only through an explicit system share sheet.
 - Hidden media is excluded and Favorites are protected by default.
 

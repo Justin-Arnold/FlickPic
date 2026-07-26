@@ -8,6 +8,7 @@ struct MediaCardView: View {
     let onLater: () -> Void
 
     @State private var image: UIImage?
+    @State private var gifAnimation: GIFAnimation?
     @State private var livePhoto: PHLivePhoto?
     @State private var player: AVPlayer?
     @State private var isLoading = true
@@ -29,10 +30,19 @@ struct MediaCardView: View {
                         }
                 } else if let image {
                     ZStack {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if let gifAnimation {
+                            GIFPlaybackView(animation: gifAnimation)
+                                .frame(
+                                    width: proxy.size.width,
+                                    height: proxy.size.height
+                                )
+                                .accessibilityHidden(true)
+                        } else {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
 
                         if let livePhoto, asset.isLivePhoto {
                             LivePhotoRepresentable(
@@ -142,6 +152,7 @@ struct MediaCardView: View {
             ImageInspectorView(
                 asset: asset,
                 initialImage: image,
+                initialGIFAnimation: gifAnimation,
                 photoLibrary: photoLibrary
             )
         }
@@ -162,6 +173,10 @@ struct MediaCardView: View {
             if asset.isLivePhoto {
                 MediaBadge(title: "Live", systemImage: "livephoto")
             }
+            if gifAnimation != nil {
+                MediaBadge(title: "GIF", systemImage: "play.rectangle")
+                    .accessibilityIdentifier("animated-gif-badge")
+            }
             if asset.mediaKind == .video {
                 MediaBadge(
                     title: asset.duration.formattedDuration,
@@ -178,6 +193,7 @@ struct MediaCardView: View {
         var parts = [asset.mediaKind.title]
         if asset.isScreenshot { parts.append("screenshot") }
         if asset.isLivePhoto { parts.append("Live Photo") }
+        if gifAnimation != nil { parts.append("animated GIF") }
         if asset.isFavorite { parts.append("favorite") }
         if let date = asset.creationDate {
             parts.append(date.formatted(date: .long, time: .shortened))
@@ -191,6 +207,7 @@ struct MediaCardView: View {
         player?.pause()
         player = nil
         image = nil
+        gifAnimation = nil
         livePhoto = nil
         isPlayingLivePhoto = false
 
@@ -208,7 +225,24 @@ struct MediaCardView: View {
             try Task.checkCancellation()
             image = loadedImage
 
-            if asset.isLivePhoto {
+            if asset.mediaKind == .photo,
+               !asset.isLivePhoto,
+               let data = try await photoLibrary.gifData(
+                identifier: asset.id
+               ) {
+                let animation = try await GIFAnimationDecoder.decode(
+                    data: data,
+                    maximumPixelDimension: max(
+                        requestedSize.width,
+                        requestedSize.height
+                    )
+                )
+                try Task.checkCancellation()
+                if animation.frameCount > 1 {
+                    gifAnimation = animation
+                    image = animation.posterImage
+                }
+            } else if asset.isLivePhoto {
                 let loadedLivePhoto = try? await photoLibrary.livePhoto(
                     identifier: asset.id,
                     targetSize: requestedSize

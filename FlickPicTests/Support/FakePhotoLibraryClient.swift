@@ -14,6 +14,8 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
     var classificationFailureIdentifiers: Set<String> = []
     var classificationRequests: [(identifier: String, allowNetworkAccess: Bool)] = []
     var inspectionRequests: [(identifier: String, targetSize: CGSize)] = []
+    var gifDataByIdentifier: [String: Data] = [:]
+    var gifDataRequests: [String] = []
     var discardedExportDirectories: Set<URL> = []
 
     init(assets: [MediaAssetDescriptor] = []) {
@@ -107,6 +109,11 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
             UIColor.systemIndigo.setFill()
             context.fill(CGRect(origin: .zero, size: targetSize))
         }
+    }
+
+    func gifData(identifier: String) async throws -> Data? {
+        gifDataRequests.append(identifier)
+        return gifDataByIdentifier[identifier]
     }
 
     func livePhoto(identifier: String, targetSize: CGSize) async throws -> PHLivePhoto {

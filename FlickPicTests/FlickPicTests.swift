@@ -411,6 +411,52 @@ struct InspectionImageSizingTests {
 }
 
 @MainActor
+struct GIFAnimationTests {
+    @Test
+    func decodesFrameTimingAndDownsamplesForPlayback() async throws {
+        let data = try GIFTestData.make()
+        let animation = try await GIFAnimationDecoder.decode(
+            data: data,
+            maximumPixelDimension: 50
+        )
+
+        #expect(animation.frameCount == 2)
+        #expect(abs(animation.totalDuration - 0.35) < 0.01)
+        #expect(animation.frameStartTimes[0].doubleValue == 0)
+        #expect(
+            abs(animation.frameStartTimes[1].doubleValue - (0.1 / 0.35))
+                < 0.01
+        )
+        #expect(animation.frames.allSatisfy { $0.width <= 50 })
+        #expect(animation.frames.allSatisfy { $0.height <= 50 })
+    }
+
+    @Test
+    func rejectsInvalidAnimationData() async {
+        await #expect(throws: GIFAnimationError.self) {
+            try await GIFAnimationDecoder.decode(
+                data: Data("not a gif".utf8),
+                maximumPixelDimension: 100
+            )
+        }
+    }
+
+    @Test
+    func photoLibraryClientReturnsGIFDataOnlyForMappedAssets() async throws {
+        let library = FakePhotoLibraryClient()
+        let data = try GIFTestData.make()
+        library.gifDataByIdentifier["gif"] = data
+
+        let loadedGIF = try await library.gifData(identifier: "gif")
+        let loadedStill = try await library.gifData(identifier: "still")
+
+        #expect(loadedGIF == data)
+        #expect(loadedStill == nil)
+        #expect(library.gifDataRequests == ["gif", "still"])
+    }
+}
+
+@MainActor
 struct ImageClassificationPolicyTests {
     @Test
     func receiptWinsOverDocumentInTheExclusiveHierarchy() {
