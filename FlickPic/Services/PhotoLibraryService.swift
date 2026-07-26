@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Observation
+import OSLog
 @preconcurrency import Photos
 import PhotosUI
 import UIKit
@@ -8,6 +9,11 @@ import UniformTypeIdentifiers
 @Observable
 @MainActor
 final class PhotoLibraryService: NSObject, PhotoLibraryClient {
+    private static let deletionLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "FlickPic",
+        category: "PhotoDeletion"
+    )
+
     private let imageManager = PHCachingImageManager()
     private let imageCache = NSCache<NSString, UIImage>()
     private let gifDataCache = NSCache<NSString, NSData>()
@@ -498,8 +504,26 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
 
         let request = PhotoDeletionRequest(identifiers: identifiers)
         guard !request.resolvedIdentifiers.isEmpty else { return [] }
-        try await PHPhotoLibrary.shared().performChanges {
-            request.performChange()
+        let deletedCount = request.resolvedIdentifiers.count
+        let changeBlock: @Sendable () -> Void = request.performChange
+
+        Self.deletionLogger.info(
+            "Submitting PhotoKit deletion for \(deletedCount, privacy: .public) assets"
+        )
+        do {
+            try await PHPhotoLibrary.shared().performChanges(changeBlock)
+            Self.deletionLogger.info(
+                "PhotoKit deletion succeeded for \(deletedCount, privacy: .public) assets"
+            )
+        } catch {
+            let nsError = error as NSError
+            Self.deletionLogger.error(
+                """
+                PhotoKit deletion failed for \(deletedCount, privacy: .public) assets: \
+                \(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)
+                """
+            )
+            throw error
         }
         return request.resolvedIdentifiers
     }
@@ -643,7 +667,7 @@ private final class PhotoRequestCancellation: @unchecked Sendable {
     }
 }
 
-private final class PhotoDeletionRequest: @unchecked Sendable {
+private nonisolated final class PhotoDeletionRequest: @unchecked Sendable {
     private let assets: [PHAsset]
     let resolvedIdentifiers: Set<String>
 
