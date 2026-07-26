@@ -1,0 +1,242 @@
+#if DEBUG
+@preconcurrency import AVFoundation
+import Foundation
+@preconcurrency import Photos
+import UIKit
+
+@MainActor
+final class UITestPhotoLibraryClient: PhotoLibraryClient {
+    let authorizationState: AuthorizationState = .full
+
+    private var assets: [MediaAssetDescriptor] = [
+        MediaAssetDescriptor(
+            id: "ui-photo-1",
+            mediaKind: .photo,
+            creationDate: Date(timeIntervalSince1970: 100),
+            modificationDate: Date(timeIntervalSince1970: 100),
+            pixelWidth: 1_200,
+            pixelHeight: 1_600,
+            duration: 0,
+            isFavorite: false,
+            isScreenshot: false,
+            isLivePhoto: false
+        ),
+        MediaAssetDescriptor(
+            id: "ui-photo-2",
+            mediaKind: .photo,
+            creationDate: Date(timeIntervalSince1970: 200),
+            modificationDate: Date(timeIntervalSince1970: 200),
+            pixelWidth: 1_600,
+            pixelHeight: 1_200,
+            duration: 0,
+            isFavorite: false,
+            isScreenshot: true,
+            isLivePhoto: false
+        ),
+        MediaAssetDescriptor(
+            id: "ui-video-1",
+            mediaKind: .video,
+            creationDate: Date(timeIntervalSince1970: 300),
+            modificationDate: Date(timeIntervalSince1970: 300),
+            pixelWidth: 1_920,
+            pixelHeight: 1_080,
+            duration: 12,
+            isFavorite: false,
+            isScreenshot: false,
+            isLivePhoto: false
+        )
+    ]
+
+    func requestAuthorization() async -> AuthorizationState {
+        authorizationState
+    }
+
+    func fetchAssets(
+        configuration: ReviewConfiguration,
+        reviewedIdentifiers: Set<String>,
+        pendingIdentifiers: Set<String>
+    ) async throws -> [MediaAssetDescriptor] {
+        let dateRange = configuration.normalizedDateRange
+        let excludesReviewed =
+            configuration.scope == .unreviewed || !configuration.includeReviewed
+
+        return assets
+            .filter { asset in
+                guard !pendingIdentifiers.contains(asset.id) else { return false }
+                guard !excludesReviewed
+                        || !reviewedIdentifiers.contains(asset.id) else {
+                    return false
+                }
+                guard configuration.includeFavorites || !asset.isFavorite else {
+                    return false
+                }
+
+                switch configuration.effectiveMediaFilter {
+                case .all:
+                    break
+                case .photos where asset.mediaKind != .photo:
+                    return false
+                case .videos where asset.mediaKind != .video:
+                    return false
+                default:
+                    break
+                }
+
+                if configuration.category == .screenshots && !asset.isScreenshot {
+                    return false
+                }
+
+                if let dateRange {
+                    guard let creationDate = asset.creationDate,
+                          dateRange.contains(creationDate) else {
+                        return false
+                    }
+                }
+                return true
+            }
+            .sorted { lhs, rhs in
+                switch (lhs.creationDate, rhs.creationDate) {
+                case let (left?, right?) where left != right:
+                    return configuration.order == .oldestFirst
+                        ? left < right
+                        : left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return lhs.id < rhs.id
+                }
+            }
+    }
+
+    func classifiableAssets() async throws -> [MediaAssetDescriptor] {
+        []
+    }
+
+    func descriptors(for identifiers: [String]) async -> [MediaAssetDescriptor] {
+        let byIdentifier = Dictionary(
+            uniqueKeysWithValues: assets.map { ($0.id, $0) }
+        )
+        return identifiers.compactMap { byIdentifier[$0] }
+    }
+
+    func thumbnail(
+        identifier: String,
+        targetSize: CGSize
+    ) async throws -> UIImage {
+        try fixtureImage(identifier: identifier, targetSize: targetSize)
+    }
+
+    func inspectionImage(
+        identifier: String,
+        targetSize: CGSize
+    ) async throws -> UIImage {
+        try fixtureImage(identifier: identifier, targetSize: targetSize)
+    }
+
+    func livePhoto(
+        identifier: String,
+        targetSize: CGSize
+    ) async throws -> PHLivePhoto {
+        throw PhotoLibraryError.imageUnavailable
+    }
+
+    func playerItem(identifier: String) async throws -> AVPlayerItem {
+        guard assets.contains(where: { $0.id == identifier }) else {
+            throw PhotoLibraryError.assetUnavailable
+        }
+        return AVPlayerItem(url: URL(fileURLWithPath: "/dev/null"))
+    }
+
+    func recognitionImageData(identifier: String) async throws -> Data {
+        let image = try fixtureImage(
+            identifier: identifier,
+            targetSize: CGSize(width: 640, height: 640)
+        )
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            throw PhotoLibraryError.imageUnavailable
+        }
+        return data
+    }
+
+    func classificationImageData(
+        identifier: String,
+        allowNetworkAccess: Bool
+    ) async throws -> Data {
+        try await recognitionImageData(identifier: identifier)
+    }
+
+    func exportCurrentMedia(identifier: String) async throws -> PreparedMediaExport {
+        guard assets.contains(where: { $0.id == identifier }) else {
+            throw PhotoLibraryError.assetUnavailable
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "FlickPicUITest-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let file = directory.appendingPathComponent("\(identifier).jpg")
+        try Data("FlickPic UI fixture".utf8).write(to: file)
+        return PreparedMediaExport(
+            directoryURL: directory,
+            itemURLs: [file]
+        )
+    }
+
+    func discardExport(_ export: PreparedMediaExport) {
+        try? FileManager.default.removeItem(at: export.directoryURL)
+    }
+
+    func deleteAssets(identifiers: [String]) async throws -> Set<String> {
+        let requested = Set(identifiers)
+        let resolved = Set(
+            assets.map(\.id).filter(requested.contains)
+        )
+        assets.removeAll { resolved.contains($0.id) }
+        return resolved
+    }
+
+    func preheat(identifiers: [String], targetSize: CGSize) {}
+
+    func stopPreheating() {}
+
+    private func fixtureImage(
+        identifier: String,
+        targetSize: CGSize
+    ) throws -> UIImage {
+        guard assets.contains(where: { $0.id == identifier }) else {
+            throw PhotoLibraryError.assetUnavailable
+        }
+        let size = CGSize(
+            width: min(max(targetSize.width, 64), 1_200),
+            height: min(max(targetSize.height, 64), 1_600)
+        )
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemIndigo.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+
+            let text = identifier as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(
+                    ofSize: max(min(size.width / 12, 54), 14),
+                    weight: .semibold
+                ),
+                .foregroundColor: UIColor.white
+            ]
+            let textSize = text.size(withAttributes: attributes)
+            text.draw(
+                at: CGPoint(
+                    x: (size.width - textSize.width) / 2,
+                    y: (size.height - textSize.height) / 2
+                ),
+                withAttributes: attributes
+            )
+        }
+    }
+}
+#endif
