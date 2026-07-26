@@ -54,8 +54,37 @@ final class FlickPicUITests: XCTestCase {
         XCTAssertTrue(app.buttons["category-metadata:videos"].exists)
         XCTAssertTrue(app.buttons["category-metadata:gifs"].exists)
         XCTAssertTrue(app.buttons["category-metadata:screenshots"].exists)
+        XCTAssertTrue(app.buttons["category-metadata:panoramas"].exists)
         XCTAssertTrue(app.buttons["start-categorizing"].exists)
         XCTAssertFalse(app.buttons["category-vision:dog"].exists)
+    }
+
+    @MainActor
+    func testMetadataCategoryHitTargetsDoNotOverlap() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let gifs = app.buttons["category-metadata:gifs"]
+        let screenshots = app.buttons["category-metadata:screenshots"]
+        XCTAssertTrue(gifs.waitForExistence(timeout: 3))
+        XCTAssertTrue(screenshots.waitForExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(
+            gifs.frame.maxX,
+            screenshots.frame.minX,
+            "Adjacent category buttons must have disjoint hit targets."
+        )
+
+        gifs.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["animated-gif-badge"]
+                .waitForExistence(timeout: 3),
+            "Tapping GIFs must open the GIF deck, not an overlapping category."
+        )
     }
 
     @MainActor

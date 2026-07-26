@@ -383,42 +383,54 @@ private struct CategoryBucketCard: View {
     @State private var thumbnail: UIImage?
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-                if let thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.15))
-                        .overlay {
-                            Image(systemName: bucket.category.systemImage)
-                                .font(.title)
-                                .foregroundStyle(.secondary)
-                        }
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let thumbnail {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay {
+                                Image(systemName: bucket.category.systemImage)
+                                    .font(.title)
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
                 }
-            }
-            .frame(height: 126)
-            .clipped()
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
+                .clipped()
 
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.78)],
-                startPoint: .top,
-                endPoint: .bottom
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.78)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(bucket.category.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(bucket.count) items")
+                        .font(.caption.monospacedDigit())
+                }
+                .foregroundStyle(.white)
+                .padding(10)
+            }
+            .frame(
+                width: geometry.size.width,
+                height: geometry.size.height,
+                alignment: .bottomLeading
             )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(bucket.category.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(bucket.count) items")
-                    .font(.caption.monospacedDigit())
-            }
-            .foregroundStyle(.white)
-            .padding(10)
         }
+        .frame(height: 126)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .contentShape(RoundedRectangle(cornerRadius: 16))
         .task(id: bucket.representativeAsset.id) {
             thumbnail = try? await photoLibrary.thumbnail(
                 identifier: bucket.representativeAsset.id,

@@ -30,12 +30,13 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
             mediaKind: .photo,
             creationDate: Date(timeIntervalSince1970: 200),
             modificationDate: Date(timeIntervalSince1970: 200),
-            pixelWidth: 1_600,
+            pixelWidth: 12_000,
             pixelHeight: 1_200,
             duration: 0,
             isFavorite: false,
             isScreenshot: true,
-            isLivePhoto: false
+            isLivePhoto: false,
+            isPanorama: true
         ),
         MediaAssetDescriptor(
             id: "ui-video-1",
@@ -229,13 +230,28 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         identifier: String,
         targetSize: CGSize
     ) throws -> UIImage {
-        guard assets.contains(where: { $0.id == identifier }) else {
+        guard let asset = assets.first(where: { $0.id == identifier }) else {
             throw PhotoLibraryError.assetUnavailable
         }
-        let size = CGSize(
-            width: min(max(targetSize.width, 64), 1_200),
-            height: min(max(targetSize.height, 64), 1_600)
-        )
+        let height = min(max(targetSize.height, 64), 1_600)
+        let size = if asset.isPanorama {
+            CGSize(
+                width: min(
+                    max(
+                        height * CGFloat(asset.pixelWidth)
+                            / CGFloat(max(asset.pixelHeight, 1)),
+                        64
+                    ),
+                    1_200
+                ),
+                height: height
+            )
+        } else {
+            CGSize(
+                width: min(max(targetSize.width, 64), 1_200),
+                height: height
+            )
+        }
         return UIGraphicsImageRenderer(size: size).image { context in
             UIColor.systemIndigo.setFill()
             context.fill(CGRect(origin: .zero, size: size))
