@@ -23,21 +23,86 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testOnboardingExplainsPrivacyBeforeAccess() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("-ui-testing")
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.staticTexts["A calmer camera roll"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["On your device"].exists)
+        XCTAssertTrue(app.staticTexts["Deletion stays deliberate"].exists)
+        XCTAssertTrue(app.staticTexts["Private categorization"].exists)
+        XCTAssertTrue(app.staticTexts["No account or tracking"].exists)
+        XCTAssertTrue(app.buttons["Continue"].exists)
+        XCTAssertEqual(app.alerts.count, 0, "Photos access must not be requested before Continue")
+    }
+
+    @MainActor
+    func testCategorySelectionForcesPhotosWithoutHidingOtherFilters() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let setup = app.buttons["review-setup"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 3))
+        setup.tap()
+
+        let category = app.descendants(matching: .any)["category-filter"]
+        XCTAssertTrue(category.waitForExistence(timeout: 3))
+        category.tap()
+        app.buttons["Receipts"].tap()
+
+        let media = app.descendants(matching: .any)["media-filter"]
+        XCTAssertTrue(media.exists)
+        XCTAssertTrue(media.label.contains("Photos"))
+        XCTAssertFalse(media.isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["scope-filter"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["review-order"].exists)
+    }
+
+    @MainActor
+    func testPhotoInspectorZoomsAndReturnsToTheSameDeckPosition() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let startReviewing = app.buttons["start-reviewing"]
+        XCTAssertTrue(startReviewing.waitForExistence(timeout: 3))
+        startReviewing.tap()
+
+        let initialPosition = app.staticTexts["1 of 3"]
+        XCTAssertTrue(initialPosition.waitForExistence(timeout: 3))
+
+        let inspect = app.buttons["inspect-details"]
+        XCTAssertTrue(inspect.waitForExistence(timeout: 3))
+        inspect.tap()
+
+        let fit = app.buttons["Fit whole image"]
+        let zoomIn = app.buttons["Zoom in"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 3))
+        XCTAssertTrue(zoomIn.exists)
+        zoomIn.tap()
+        fit.tap()
+        app.buttons["Close detail"].tap()
+
+        XCTAssertTrue(initialPosition.waitForExistence(timeout: 3))
     }
 
     @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            let app = XCUIApplication()
+            app.launchArguments.append("-ui-testing")
+            app.launch()
         }
     }
 }
