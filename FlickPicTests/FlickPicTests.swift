@@ -22,6 +22,32 @@ struct PhotoLibraryErrorTests {
     }
 }
 
+struct VisionCategoryDisplayPolicyTests {
+    @Test
+    func hidesScreenshotIdentifiersAlreadyCoveredByMetadata() {
+        #expect(
+            !VisionCategoryDisplayPolicy.shouldDisplay(
+                identifier: "screenshot"
+            )
+        )
+        #expect(
+            !VisionCategoryDisplayPolicy.shouldDisplay(
+                identifier: "Screenshots"
+            )
+        )
+        #expect(
+            !VisionCategoryDisplayPolicy.shouldDisplay(
+                identifier: "screen_shot"
+            )
+        )
+        #expect(
+            VisionCategoryDisplayPolicy.shouldDisplay(
+                identifier: "screen"
+            )
+        )
+    }
+}
+
 @MainActor
 struct ReviewRepositoryTests {
     @Test
@@ -910,11 +936,23 @@ struct CategoryDashboardTests {
                 classifierVersion: ImageClassificationPolicy.classifierVersion,
                 results: [
                     photo.id: ImageClassificationResult(
-                        tags: [VisionTag(identifier: "dog", confidence: 0.95)],
+                        tags: [
+                            VisionTag(identifier: "dog", confidence: 0.95),
+                            VisionTag(
+                                identifier: "screenshot",
+                                confidence: 0.94
+                            )
+                        ],
                         classifierVersion: ImageClassificationPolicy.classifierVersion
                     ),
                     secondPhoto.id: ImageClassificationResult(
-                        tags: [VisionTag(identifier: "dog", confidence: 0.94)],
+                        tags: [
+                            VisionTag(identifier: "dog", confidence: 0.94),
+                            VisionTag(
+                                identifier: "screen_shot",
+                                confidence: 0.93
+                            )
+                        ],
                         classifierVersion: ImageClassificationPolicy.classifierVersion
                     )
                 ]
@@ -953,6 +991,12 @@ struct CategoryDashboardTests {
         #expect(dashboard.visionBuckets.first?.count == 2)
         #expect(dashboard.discoveredVisionCategoryCount == 1)
         #expect(dashboard.visibleVisionCategoryCount == 1)
+        #expect(
+            !dashboard.visionBuckets.contains {
+                $0.category == .vision("screenshot")
+                    || $0.category == .vision("screen_shot")
+            }
+        )
     }
 
     @Test

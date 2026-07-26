@@ -94,6 +94,14 @@ nonisolated enum VisionCategoryDisplayPolicy {
             minimumSizeRange.upperBound
         )
     }
+
+    static func shouldDisplay(identifier: String) -> Bool {
+        let normalized = identifier
+            .lowercased()
+            .filter(\.isLetter)
+        return normalized != "screenshot"
+            && normalized != "screenshots"
+    }
 }
 
 struct ImageClassificationResult: Equatable, Sendable {

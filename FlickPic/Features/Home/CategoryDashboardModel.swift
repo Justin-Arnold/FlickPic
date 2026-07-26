@@ -124,7 +124,10 @@ final class CategoryDashboardModel {
         var counts: [String: Int] = [:]
         var representatives: [String: MediaAssetDescriptor] = [:]
         for asset in eligibleAssets {
-            for identifier in visionIdentifiersByAsset[asset.id] ?? [] {
+            for identifier in visionIdentifiersByAsset[asset.id] ?? []
+                where VisionCategoryDisplayPolicy.shouldDisplay(
+                    identifier: identifier
+                ) {
                 counts[identifier, default: 0] += 1
                 representatives[identifier] = representatives[identifier] ?? asset
             }
