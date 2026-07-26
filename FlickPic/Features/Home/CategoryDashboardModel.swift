@@ -14,6 +14,7 @@ struct CategoryBucket: Identifiable {
 final class CategoryDashboardModel {
     private(set) var metadataBuckets: [CategoryBucket] = []
     private(set) var visionBuckets: [CategoryBucket] = []
+    private(set) var discoveredVisionCategoryCount = 0
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
@@ -24,9 +25,11 @@ final class CategoryDashboardModel {
     private weak var photoLibrary: (any PhotoLibraryClient)?
     private weak var coordinator: ClassificationCoordinator?
     private var configuration = ReviewConfiguration()
+    private var minimumVisionCategorySize =
+        VisionCategoryDisplayPolicy.defaultMinimumSize
     private var updatesTask: Task<Void, Never>?
 
-    var visionCategoryCount: Int {
+    var visibleVisionCategoryCount: Int {
         visionBuckets.count
     }
 
@@ -34,12 +37,17 @@ final class CategoryDashboardModel {
         configuration: ReviewConfiguration,
         repository: ReviewRepository,
         photoLibrary: any PhotoLibraryClient,
-        coordinator: ClassificationCoordinator
+        coordinator: ClassificationCoordinator,
+        minimumVisionCategorySize: Int
     ) async {
         self.configuration = configuration
         self.repository = repository
         self.photoLibrary = photoLibrary
         self.coordinator = coordinator
+        self.minimumVisionCategorySize =
+            VisionCategoryDisplayPolicy.normalizedMinimumSize(
+                minimumVisionCategorySize
+            )
         beginObservingUpdatesIfNeeded(coordinator: coordinator)
 
         isLoading = true
@@ -88,7 +96,8 @@ final class CategoryDashboardModel {
                 configuration: configuration,
                 repository: repository,
                 photoLibrary: photoLibrary,
-                coordinator: coordinator
+                coordinator: coordinator,
+                minimumVisionCategorySize: minimumVisionCategorySize
             )
             return
         }
@@ -121,8 +130,10 @@ final class CategoryDashboardModel {
             }
         }
 
+        discoveredVisionCategoryCount = counts.count
         visionBuckets = counts.compactMap { identifier, count in
-            guard let representative = representatives[identifier] else {
+            guard count >= minimumVisionCategorySize,
+                  let representative = representatives[identifier] else {
                 return nil
             }
             return CategoryBucket(

@@ -13,6 +13,14 @@ struct ReviewRepository {
 
         if let existing = try modelContext.fetch(descriptor).first {
             var changed = existing.migrateLegacyCategoryConfiguration()
+            let normalizedMinimum =
+                VisionCategoryDisplayPolicy.normalizedMinimumSize(
+                    existing.minimumVisionCategorySize
+                )
+            if existing.minimumVisionCategorySize != normalizedMinimum {
+                existing.minimumVisionCategorySize = normalizedMinimum
+                changed = true
+            }
             if !existing.hasStartedCategorization,
                try !modelContext.fetch(
                 FetchDescriptor<AssetClassification>()
@@ -53,6 +61,13 @@ struct ReviewRepository {
     func setHapticsEnabled(_ isEnabled: Bool) throws {
         let preference = try preference()
         preference.hapticsEnabled = isEnabled
+        try modelContext.save()
+    }
+
+    func setMinimumVisionCategorySize(_ minimumSize: Int) throws {
+        let preference = try preference()
+        preference.minimumVisionCategorySize =
+            VisionCategoryDisplayPolicy.normalizedMinimumSize(minimumSize)
         try modelContext.save()
     }
 

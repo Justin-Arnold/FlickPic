@@ -97,6 +97,8 @@ final class FlickPicUITests: XCTestCase {
         ]
         app.launch()
 
+        setVisionCategoryMinimumToOne(in: app)
+
         let start = app.buttons["start-categorizing"]
         XCTAssertTrue(start.waitForExistence(timeout: 3))
         start.tap()
@@ -110,6 +112,39 @@ final class FlickPicUITests: XCTestCase {
             app.staticTexts["1 of 2"].waitForExistence(timeout: 8),
             "The active deck should grow when the second Vision result arrives."
         )
+    }
+
+    @MainActor
+    func testVisionCategoryMinimumHidesAndRevealsExistingBuckets() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let start = app.buttons["start-categorizing"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let counts = app.descendants(matching: .any)["vision-category-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 3))
+        let finalCounts = NSPredicate(
+            format: "label == %@",
+            "2 found · 0 shown"
+        )
+        expectation(for: finalCounts, evaluatedWith: counts)
+        waitForExpectations(timeout: 8)
+        XCTAssertFalse(app.buttons["category-vision:dog"].exists)
+
+        setVisionCategoryMinimumToOne(in: app)
+
+        XCTAssertTrue(
+            app.buttons["category-vision:dog"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["category-vision:document"].exists)
+        XCTAssertEqual(counts.label, "2 found · 2 shown")
     }
 
     @MainActor
@@ -205,5 +240,25 @@ final class FlickPicUITests: XCTestCase {
             app.launchArguments.append("-ui-testing")
             app.launch()
         }
+    }
+
+    @MainActor
+    private func setVisionCategoryMinimumToOne(
+        in app: XCUIApplication
+    ) {
+        let settings = app.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 3))
+        settings.tap()
+
+        let stepper = app.steppers["minimum-vision-category-size"]
+        XCTAssertTrue(stepper.waitForExistence(timeout: 3))
+        let decrement = app.buttons[
+            "minimum-vision-category-size-Decrement"
+        ]
+        XCTAssertTrue(decrement.exists)
+        for _ in 0..<4 {
+            decrement.tap()
+        }
+        app.buttons["Done"].tap()
     }
 }

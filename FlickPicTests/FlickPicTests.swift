@@ -571,6 +571,29 @@ struct ClassificationPersistenceTests {
         #expect(migrated.configuration.scope == .unreviewed)
         #expect(migrated.configuration.mediaFilter == .photos)
         #expect(migrated.categoryRawValue == "any")
+        #expect(
+            migrated.minimumVisionCategorySize
+                == VisionCategoryDisplayPolicy.defaultMinimumSize
+        )
+    }
+
+    @Test
+    func visionCategoryMinimumPersistsAndNormalizesToSupportedRange() throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+
+        let preference = try repository.preference()
+        #expect(preference.minimumVisionCategorySize == 5)
+
+        try repository.setMinimumVisionCategorySize(12)
+        #expect(try repository.preference().minimumVisionCategorySize == 12)
+
+        try repository.setMinimumVisionCategorySize(0)
+        #expect(try repository.preference().minimumVisionCategorySize == 1)
+
+        preference.minimumVisionCategorySize = 500
+        try container.mainContext.save()
+        #expect(try repository.preference().minimumVisionCategorySize == 50)
     }
 
     @Test
@@ -866,6 +889,7 @@ struct CategoryDashboardTests {
         )
         let coordinator = ClassificationCoordinator(
             classifier: FakeImageClassificationClient(
+                classifierVersion: ImageClassificationPolicy.classifierVersion,
                 results: [
                     photo.id: ImageClassificationResult(
                         tags: [VisionTag(identifier: "dog", confidence: 0.95)],
@@ -884,7 +908,8 @@ struct CategoryDashboardTests {
             configuration: ReviewConfiguration(),
             repository: repository,
             photoLibrary: library,
-            coordinator: coordinator
+            coordinator: coordinator,
+            minimumVisionCategorySize: 1
         )
 
         #expect(
@@ -908,6 +933,98 @@ struct CategoryDashboardTests {
 
         #expect(dashboard.visionBuckets.first?.category == .vision("dog"))
         #expect(dashboard.visionBuckets.first?.count == 2)
+        #expect(dashboard.discoveredVisionCategoryCount == 1)
+        #expect(dashboard.visibleVisionCategoryCount == 1)
+    }
+
+    @Test
+    func visionMinimumUsesEligibleCountsAndStreamsTheThresholdMatch() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let photos = (1...5).map {
+            MediaAssetDescriptor.fixture(id: "photo-\($0)")
+        }
+        let result = ImageClassificationResult(
+            tags: [VisionTag(identifier: "wine", confidence: 0.95)],
+            classifierVersion: ImageClassificationPolicy.classifierVersion
+        )
+        let classifier = FakeImageClassificationClient(
+            classifierVersion: ImageClassificationPolicy.classifierVersion,
+            results: Dictionary(
+                uniqueKeysWithValues: photos.map { ($0.id, result) }
+            )
+        )
+        let library = FakePhotoLibraryClient(
+            assets: Array(photos.prefix(4))
+        )
+        let coordinator = ClassificationCoordinator(classifier: classifier)
+        let dashboard = CategoryDashboardModel()
+
+        await dashboard.load(
+            configuration: ReviewConfiguration(),
+            repository: repository,
+            photoLibrary: library,
+            coordinator: coordinator,
+            minimumVisionCategorySize: 5
+        )
+        _ = await coordinator.runLocalIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<50
+            where dashboard.discoveredVisionCategoryCount != 1 {
+            await Task.yield()
+        }
+
+        #expect(
+            dashboard.metadataBuckets.first {
+                $0.category == .metadata(.images)
+            }?.count == 4
+        )
+        #expect(dashboard.discoveredVisionCategoryCount == 1)
+        #expect(dashboard.visionBuckets.isEmpty)
+
+        await dashboard.load(
+            configuration: ReviewConfiguration(),
+            repository: repository,
+            photoLibrary: library,
+            coordinator: coordinator,
+            minimumVisionCategorySize: 4
+        )
+        #expect(dashboard.visionBuckets.first?.count == 4)
+
+        library.assets.append(photos[4])
+        await dashboard.load(
+            configuration: ReviewConfiguration(),
+            repository: repository,
+            photoLibrary: library,
+            coordinator: coordinator,
+            minimumVisionCategorySize: 5
+        )
+        #expect(dashboard.visionBuckets.isEmpty)
+
+        _ = await coordinator.runLocalIndexing(
+            repository: repository,
+            photoLibrary: library
+        )
+        for _ in 0..<50
+            where dashboard.visionBuckets.first?.count != 5 {
+            await Task.yield()
+        }
+
+        #expect(dashboard.visionBuckets.first?.category == .vision("wine"))
+        #expect(dashboard.visionBuckets.first?.count == 5)
+
+        try repository.markKept(identifier: photos[0].id)
+        await dashboard.load(
+            configuration: ReviewConfiguration(),
+            repository: repository,
+            photoLibrary: library,
+            coordinator: coordinator,
+            minimumVisionCategorySize: 5
+        )
+        #expect(dashboard.discoveredVisionCategoryCount == 1)
+        #expect(dashboard.visionBuckets.isEmpty)
     }
 
     @Test
@@ -928,7 +1045,8 @@ struct CategoryDashboardTests {
                 configuration: ReviewConfiguration(),
                 repository: repository,
                 photoLibrary: library,
-                coordinator: coordinator
+                coordinator: coordinator,
+                minimumVisionCategorySize: 5
             )
         }
         await Task.yield()

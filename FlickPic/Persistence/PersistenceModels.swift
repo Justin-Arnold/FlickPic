@@ -49,13 +49,16 @@ final class AppPreference {
     var includeFavorites: Bool
     var hapticsEnabled: Bool
     var hasStartedCategorization: Bool = false
+    var minimumVisionCategorySize: Int = 5
 
     init(
         key: String = "primary",
         hasCompletedOnboarding: Bool = false,
         configuration: ReviewConfiguration = ReviewConfiguration(),
         hapticsEnabled: Bool = true,
-        hasStartedCategorization: Bool = false
+        hasStartedCategorization: Bool = false,
+        minimumVisionCategorySize: Int =
+            VisionCategoryDisplayPolicy.defaultMinimumSize
     ) {
         self.key = key
         self.hasCompletedOnboarding = hasCompletedOnboarding
@@ -70,6 +73,10 @@ final class AppPreference {
         self.includeFavorites = configuration.includeFavorites
         self.hapticsEnabled = hapticsEnabled
         self.hasStartedCategorization = hasStartedCategorization
+        self.minimumVisionCategorySize =
+            VisionCategoryDisplayPolicy.normalizedMinimumSize(
+                minimumVisionCategorySize
+            )
     }
 
     var configuration: ReviewConfiguration {

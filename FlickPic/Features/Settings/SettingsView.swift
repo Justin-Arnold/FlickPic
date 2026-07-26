@@ -10,6 +10,8 @@ struct SettingsView: View {
     let classificationCoordinator: ClassificationCoordinator
 
     @State private var hapticsEnabled = true
+    @State private var minimumVisionCategorySize =
+        VisionCategoryDisplayPolicy.defaultMinimumSize
     @State private var showingResetConfirmation = false
     @State private var showingRebuildConfirmation = false
     @State private var errorMessage: String?
@@ -57,6 +59,36 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Stepper(
+                    value: $minimumVisionCategorySize,
+                    in: VisionCategoryDisplayPolicy.minimumSizeRange
+                ) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Minimum Category Size")
+                        Text(minimumCategorySizeDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("minimum-vision-category-size")
+                .onChange(of: minimumVisionCategorySize) { _, newValue in
+                    guard newValue != preference?.minimumVisionCategorySize else {
+                        return
+                    }
+                    do {
+                        try ReviewRepository(modelContext: modelContext)
+                            .setMinimumVisionCategorySize(newValue)
+                    } catch {
+                        minimumVisionCategorySize =
+                            VisionCategoryDisplayPolicy.normalizedMinimumSize(
+                                preference?.minimumVisionCategorySize
+                                    ?? VisionCategoryDisplayPolicy
+                                        .defaultMinimumSize
+                            )
+                        errorMessage = error.localizedDescription
+                    }
+                }
+
                 if classificationCoordinator.failedCount > 0 {
                     Button("Retry Failed Items") {
                         do {
@@ -75,7 +107,12 @@ struct SettingsView: View {
             } header: {
                 Text("On-Device Categories")
             } footer: {
-                Text("Apple Vision examines small previews locally. An item can have several category tags. FlickPic never stores OCR text or embeddings.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        "Vision categories appear after at least \(minimumVisionCategorySize) eligible matches under the current review setup. Changing this does not rescan your library."
+                    )
+                    Text("Apple Vision examines small previews locally. An item can have several category tags. FlickPic never stores OCR text or embeddings.")
+                }
             }
 
             Section {
@@ -124,6 +161,11 @@ struct SettingsView: View {
         }
         .onAppear {
             hapticsEnabled = preference?.hapticsEnabled ?? true
+            minimumVisionCategorySize =
+                VisionCategoryDisplayPolicy.normalizedMinimumSize(
+                    preference?.minimumVisionCategorySize
+                        ?? VisionCategoryDisplayPolicy.defaultMinimumSize
+                )
         }
         .alert("Reset review history?", isPresented: $showingResetConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -176,6 +218,14 @@ struct SettingsView: View {
         case .limited: "Selected Photos"
         case .denied: "Denied"
         case .restricted: "Restricted"
+        }
+    }
+
+    private var minimumCategorySizeDescription: LocalizedStringKey {
+        if minimumVisionCategorySize == 1 {
+            "1 eligible photo"
+        } else {
+            "\(minimumVisionCategorySize) eligible photos"
         }
     }
 

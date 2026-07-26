@@ -29,6 +29,13 @@ struct HomeView: View {
         preference?.hasStartedCategorization == true
     }
 
+    private var minimumVisionCategorySize: Int {
+        VisionCategoryDisplayPolicy.normalizedMinimumSize(
+            preference?.minimumVisionCategorySize
+                ?? VisionCategoryDisplayPolicy.defaultMinimumSize
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -76,7 +83,12 @@ struct HomeView: View {
                     )
                 }
             }
-            .sheet(isPresented: $showingSettings) {
+            .sheet(
+                isPresented: $showingSettings,
+                onDismiss: {
+                    dashboardRefreshToken = UUID()
+                }
+            ) {
                 NavigationStack {
                     SettingsView(
                         photoLibrary: photoLibrary,
@@ -106,7 +118,8 @@ struct HomeView: View {
                     configuration: configuration,
                     repository: ReviewRepository(modelContext: modelContext),
                     photoLibrary: photoLibrary,
-                    coordinator: classificationCoordinator
+                    coordinator: classificationCoordinator,
+                    minimumVisionCategorySize: minimumVisionCategorySize
                 )
             }
             .onChange(of: photoLibrary.changeVersion) {
@@ -247,11 +260,7 @@ struct HomeView: View {
                 categorizationStatus
 
                 if dashboard.visionBuckets.isEmpty {
-                    Text(
-                        classificationCoordinator.isIndexing
-                            ? "Vision categories will appear here as they’re found."
-                            : "No Vision categories match this review setup yet."
-                    )
+                    visionCategoryEmptyMessage
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 } else {
@@ -294,9 +303,14 @@ struct HomeView: View {
                 )
                 .font(.headline)
                 Spacer()
-                Text("\(dashboard.visionCategoryCount) found")
+                Text(
+                    "\(dashboard.discoveredVisionCategoryCount) found · \(dashboard.visibleVisionCategoryCount) shown"
+                )
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .accessibilityIdentifier("vision-category-counts")
             }
 
             if classificationCoordinator.isIndexing {
@@ -323,6 +337,20 @@ struct HomeView: View {
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var visionCategoryEmptyMessage: Text {
+        if classificationCoordinator.isIndexing {
+            Text(
+                "Vision categories appear after at least \(minimumVisionCategorySize) eligible matches are found."
+            )
+        } else if dashboard.discoveredVisionCategoryCount > 0 {
+            Text(
+                "No Vision categories have at least \(minimumVisionCategorySize) eligible matches for this review setup."
+            )
+        } else {
+            Text("No Vision categories match this review setup yet.")
+        }
     }
 
     private func bucketGrid(_ buckets: [CategoryBucket]) -> some View {

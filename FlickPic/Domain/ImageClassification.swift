@@ -84,6 +84,18 @@ struct VisionTag: Equatable, Hashable, Sendable {
     }
 }
 
+nonisolated enum VisionCategoryDisplayPolicy {
+    static let defaultMinimumSize = 5
+    static let minimumSizeRange = 1...50
+
+    static func normalizedMinimumSize(_ value: Int) -> Int {
+        min(
+            max(value, minimumSizeRange.lowerBound),
+            minimumSizeRange.upperBound
+        )
+    }
+}
+
 struct ImageClassificationResult: Equatable, Sendable {
     let tags: [VisionTag]
     let classifierVersion: Int
