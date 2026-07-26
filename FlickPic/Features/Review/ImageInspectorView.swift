@@ -168,9 +168,10 @@ struct ImageInspectorView: View {
             try Task.checkCancellation()
             detailedImage = image
 
-            if let data = try await photoLibrary.gifData(
+            if asset.isPlayableGIF,
+               let data = try await photoLibrary.gifData(
                 identifier: asset.id
-            ) {
+               ) {
                 let targetSize = InspectionImageSizing.targetSize(for: asset)
                 let animation = try await GIFAnimationDecoder.decode(
                     data: data,

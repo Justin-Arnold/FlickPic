@@ -34,6 +34,10 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
     let isSlowMotion: Bool
     let isTimeLapse: Bool
 
+    var isPlayableGIF: Bool {
+        mediaKind == .photo && isGIF && !isLivePhoto
+    }
+
     nonisolated init(
         id: String,
         mediaKind: MediaKind,

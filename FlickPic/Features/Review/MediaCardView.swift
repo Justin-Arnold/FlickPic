@@ -225,8 +225,7 @@ struct MediaCardView: View {
             try Task.checkCancellation()
             image = loadedImage
 
-            if asset.mediaKind == .photo,
-               !asset.isLivePhoto,
+            if asset.isPlayableGIF,
                let data = try await photoLibrary.gifData(
                 identifier: asset.id
                ) {

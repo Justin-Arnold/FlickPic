@@ -459,6 +459,20 @@ struct GIFAnimationTests {
         #expect(loadedStill == nil)
         #expect(library.gifDataRequests == ["gif", "still"])
     }
+
+    @Test
+    func onlyKnownStandaloneGIFsRequestPlaybackData() {
+        let gif = MediaAssetDescriptor.fixture(id: "gif", gif: true)
+        let still = MediaAssetDescriptor.fixture(id: "still")
+        let livePhoto = MediaAssetDescriptor.fixture(
+            id: "live",
+            livePhoto: true
+        )
+
+        #expect(gif.isPlayableGIF)
+        #expect(!still.isPlayableGIF)
+        #expect(!livePhoto.isPlayableGIF)
+    }
 }
 
 @MainActor

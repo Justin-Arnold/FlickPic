@@ -224,15 +224,8 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
         guard !nonGIFIdentifiers.contains(identifier) else { return nil }
 
         let asset = try asset(identifier: identifier)
-        guard asset.mediaType == .image else {
-            nonGIFIdentifiers.insert(identifier)
-            return nil
-        }
-
-        let isGIF = PHAssetResource.assetResources(for: asset).contains {
-            UTType($0.uniformTypeIdentifier)?.conforms(to: .gif) == true
-        }
-        guard isGIF else {
+        guard asset.mediaType == .image,
+              asset.playbackStyle == .imageAnimated else {
             nonGIFIdentifiers.insert(identifier)
             return nil
         }
