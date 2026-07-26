@@ -95,8 +95,6 @@ struct HomeView: View {
                 ) {
                     session.endSession()
                     activeSession = nil
-                    classificationCoordinator.setReviewActive(false)
-                    dashboardRefreshToken = UUID()
                 }
             }
             .task(id: dashboardRefreshToken) {

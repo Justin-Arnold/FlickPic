@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 final class UITestPhotoLibraryClient: PhotoLibraryClient {
     let authorizationState: AuthorizationState = .full
 
+    private var fetchAssetsCallCount = 0
     private var assets: [MediaAssetDescriptor] = [
         MediaAssetDescriptor(
             id: "ui-photo-1",
@@ -59,6 +60,13 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
         reviewedIdentifiers: Set<String>,
         pendingIdentifiers: Set<String>
     ) async throws -> [MediaAssetDescriptor] {
+        fetchAssetsCallCount += 1
+        if ProcessInfo.processInfo.arguments.contains(
+            "-ui-testing-delayed-dashboard-refresh"
+        ), fetchAssetsCallCount >= 3 {
+            try await Task.sleep(for: .seconds(1))
+        }
+
         let dateRange = configuration.normalizedDateRange
         let excludesReviewed =
             configuration.scope == .unreviewed || !configuration.includeReviewed

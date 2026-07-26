@@ -43,6 +43,7 @@ final class CategoryDashboardModel {
         beginObservingUpdatesIfNeeded(coordinator: coordinator)
 
         isLoading = true
+        defer { isLoading = false }
         errorMessage = nil
         do {
             let reviewed = try repository.reviewedIdentifiers()
@@ -60,10 +61,11 @@ final class CategoryDashboardModel {
                 )
                 .mapValues { Set($0.map(\.identifier)) }
             rebuildBuckets()
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     private func beginObservingUpdatesIfNeeded(

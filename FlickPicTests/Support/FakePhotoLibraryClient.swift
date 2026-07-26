@@ -17,6 +17,7 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
     var gifDataByIdentifier: [String: Data] = [:]
     var gifDataRequests: [String] = []
     var discardedExportDirectories: Set<URL> = []
+    var fetchAssetsDelay: Duration?
 
     init(assets: [MediaAssetDescriptor] = []) {
         self.assets = assets
@@ -31,6 +32,9 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
         reviewedIdentifiers: Set<String>,
         pendingIdentifiers: Set<String>
     ) async throws -> [MediaAssetDescriptor] {
+        if let fetchAssetsDelay {
+            try await Task.sleep(for: fetchAssetsDelay)
+        }
         let dateRange = configuration.normalizedDateRange
         let excludesReviewed =
             configuration.scope == .unreviewed || !configuration.includeReviewed

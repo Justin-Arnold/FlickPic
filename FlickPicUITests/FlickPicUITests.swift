@@ -84,6 +84,39 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
+    func testCompletingGIFDeckDoesNotShowCancellationError() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures",
+            "-ui-testing-delayed-dashboard-refresh"
+        ]
+        app.launch()
+
+        let gifs = app.buttons["category-metadata:gifs"]
+        XCTAssertTrue(gifs.waitForExistence(timeout: 3))
+        gifs.tap()
+
+        XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 3))
+        app.buttons["Keep"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Nothing to Review"].waitForExistence(timeout: 3)
+        )
+        app.buttons["End Session"].firstMatch.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Review by Category"].waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS 'CancellationError'"))
+                .firstMatch
+                .waitForExistence(timeout: 2)
+        )
+    }
+
+    @MainActor
     func testPhotoInspectorZoomsAndReturnsToTheSameDeckPosition() throws {
         let app = XCUIApplication()
         app.launchArguments += [

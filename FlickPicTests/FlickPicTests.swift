@@ -896,6 +896,35 @@ struct CategoryDashboardTests {
         #expect(dashboard.visionBuckets.first?.count == 2)
     }
 
+    @Test
+    func canceledRefreshDoesNotSurfaceAsADashboardError() async throws {
+        let container = try makeContainer()
+        let repository = ReviewRepository(modelContext: container.mainContext)
+        let library = FakePhotoLibraryClient(
+            assets: [.fixture(id: "gif", gif: true)]
+        )
+        library.fetchAssetsDelay = .seconds(1)
+        let coordinator = ClassificationCoordinator(
+            classifier: FakeImageClassificationClient()
+        )
+        let dashboard = CategoryDashboardModel()
+
+        let refresh = Task { @MainActor in
+            await dashboard.load(
+                configuration: ReviewConfiguration(),
+                repository: repository,
+                photoLibrary: library,
+                coordinator: coordinator
+            )
+        }
+        await Task.yield()
+        refresh.cancel()
+        await refresh.value
+
+        #expect(dashboard.errorMessage == nil)
+        #expect(!dashboard.isLoading)
+    }
+
     private func makeContainer() throws -> ModelContainer {
         try ModelContainer(
             for: ReviewedAsset.self,
