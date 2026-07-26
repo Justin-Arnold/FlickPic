@@ -16,6 +16,10 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
     var inspectionRequests: [(identifier: String, targetSize: CGSize)] = []
     var gifDataByIdentifier: [String: Data] = [:]
     var gifDataRequests: [String] = []
+    var playerItemRequests: [String] = []
+    var playerItemError: Error?
+    var playerItemHandler:
+        ((String) async throws -> AVPlayerItem)?
     var discardedExportDirectories: Set<URL> = []
     var fetchAssetsDelay: Duration?
 
@@ -121,7 +125,16 @@ final class FakePhotoLibraryClient: PhotoLibraryClient {
     }
 
     func playerItem(identifier: String) async throws -> AVPlayerItem {
-        AVPlayerItem(url: URL(fileURLWithPath: "/dev/null"))
+        playerItemRequests.append(identifier)
+        if let playerItemHandler {
+            return try await playerItemHandler(identifier)
+        }
+        if let playerItemError {
+            throw playerItemError
+        }
+        return AVPlayerItem(
+            url: URL(fileURLWithPath: "/dev/null")
+        )
     }
 
     func recognitionImageData(identifier: String) async throws -> Data {

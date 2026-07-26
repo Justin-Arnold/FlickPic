@@ -3,6 +3,8 @@ import PhotosUI
 import SwiftUI
 
 struct MediaCardView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     let asset: MediaAssetDescriptor
     let photoLibrary: any PhotoLibraryClient
     let onLater: () -> Void
@@ -10,9 +12,8 @@ struct MediaCardView: View {
     @State private var image: UIImage?
     @State private var gifAnimation: GIFAnimation?
     @State private var livePhoto: PHLivePhoto?
-    @State private var player: AVPlayer?
+    @State private var videoPlayback = VideoPlaybackController()
     @State private var isLoading = true
-    @State private var isLoadingVideo = false
     @State private var errorMessage: String?
     @State private var retryToken = UUID()
     @State private var isPlayingLivePhoto = false
@@ -23,11 +24,9 @@ struct MediaCardView: View {
             ZStack {
                 Color(white: 0.08)
 
-                if let player {
+                if let player = videoPlayback.player {
                     VideoPlayer(player: player)
-                        .onDisappear {
-                            player.pause()
-                        }
+                        .accessibilityIdentifier("video-player")
                 } else if let image {
                     ZStack {
                         if let gifAnimation {
@@ -90,7 +89,7 @@ struct MediaCardView: View {
                         .controlSize(.large)
                 }
 
-                if isLoadingVideo {
+                if videoPlayback.isLoading {
                     ProgressView("Loading video…")
                         .tint(.white)
                         .foregroundStyle(.white)
@@ -98,16 +97,24 @@ struct MediaCardView: View {
                         .background(.black.opacity(0.65), in: Capsule())
                 }
 
-                if let errorMessage {
+                if let displayedErrorMessage {
                     VStack(spacing: 12) {
-                        Image(systemName: "icloud.slash")
+                        Image(
+                            systemName: videoPlayback.errorMessage == nil
+                                ? "icloud.slash"
+                                : "speaker.slash"
+                        )
                             .font(.largeTitle)
-                        Text(errorMessage)
+                        Text(displayedErrorMessage)
                             .font(.subheadline)
                             .multilineTextAlignment(.center)
                         HStack {
                             Button("Retry") {
-                                retryToken = UUID()
+                                if videoPlayback.errorMessage != nil {
+                                    playVideo()
+                                } else {
+                                    retryToken = UUID()
+                                }
                             }
                             .buttonStyle(.borderedProminent)
                             Button("Later", action: onLater)
@@ -153,6 +160,17 @@ struct MediaCardView: View {
         .accessibilityAction(named: "Inspect Details") {
             inspectPhoto()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase != .active else { return }
+            videoPlayback.pauseForExternalEvent()
+        }
+        .onDisappear {
+            videoPlayback.stopAndReset()
+        }
+    }
+
+    private var displayedErrorMessage: String? {
+        videoPlayback.errorMessage ?? errorMessage
     }
 
     private var metadataBadges: some View {
@@ -194,8 +212,7 @@ struct MediaCardView: View {
     private func loadMedia(targetSize: CGSize) async {
         isLoading = true
         errorMessage = nil
-        player?.pause()
-        player = nil
+        videoPlayback.stopAndReset()
         image = nil
         gifAnimation = nil
         livePhoto = nil
@@ -248,19 +265,10 @@ struct MediaCardView: View {
     }
 
     private func playVideo() {
-        guard player == nil, !isLoadingVideo else { return }
-        isLoadingVideo = true
-        Task {
-            do {
-                let item = try await photoLibrary.playerItem(identifier: asset.id)
-                let newPlayer = AVPlayer(playerItem: item)
-                player = newPlayer
-                newPlayer.play()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isLoadingVideo = false
-        }
+        videoPlayback.play(
+            identifier: asset.id,
+            photoLibrary: photoLibrary
+        )
     }
 
     private func inspectPhoto() {
