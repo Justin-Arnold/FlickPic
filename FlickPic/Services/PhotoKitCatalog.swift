@@ -124,7 +124,10 @@ actor PhotoKitCatalog {
                 stop.pointee = true
                 return
             }
-            if let descriptor = MediaAssetDescriptor(asset: asset) {
+            if let descriptor = MediaAssetDescriptor(
+                asset: asset,
+                includeGIFMetadata: false
+            ) {
                 descriptors.append(descriptor)
             }
         }

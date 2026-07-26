@@ -70,7 +70,10 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
         self.isTimeLapse = isTimeLapse
     }
 
-    nonisolated init?(asset: PHAsset) {
+    nonisolated init?(
+        asset: PHAsset,
+        includeGIFMetadata: Bool = true
+    ) {
         guard let mediaKind = MediaKind(rawValue: asset.mediaType.rawValue) else {
             return nil
         }
@@ -86,7 +89,9 @@ struct MediaAssetDescriptor: Identifiable, Hashable, Sendable {
             isFavorite: asset.isFavorite,
             isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
             isLivePhoto: asset.mediaSubtypes.contains(.photoLive),
-            isGIF: asset.mediaType == .image
+            isGIF: includeGIFMetadata
+                && asset.mediaType == .image
+                && asset.playbackStyle == .imageAnimated
                 && PHAssetResource.assetResources(for: asset).contains {
                     UTType($0.uniformTypeIdentifier)?.conforms(to: .gif) == true
                 },
