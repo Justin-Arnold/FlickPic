@@ -2,7 +2,6 @@ import SwiftData
 import SwiftUI
 
 struct PendingDeletionView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PendingDeletion.queuedAt) private var pendingItems: [PendingDeletion]
 
@@ -99,12 +98,8 @@ struct PendingDeletionView: View {
                 }
             }
         }
-        .navigationTitle("Pending Deletions")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Queue")
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Done") { dismiss() }
-            }
             if !pendingItems.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

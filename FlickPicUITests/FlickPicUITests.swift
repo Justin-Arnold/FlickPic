@@ -131,6 +131,16 @@ final class FlickPicUITests: XCTestCase {
                 .waitForExistence(timeout: 3)
         )
         XCTAssertFalse(app.buttons["onboarding-start"].exists)
+
+        selectTab("tab-queue", in: app)
+        XCTAssertTrue(
+            app.staticTexts["Deletion Queue Is Empty"]
+                .waitForExistence(timeout: 3)
+        )
+        selectTab("tab-settings", in: app)
+        XCTAssertTrue(
+            app.staticTexts["Photos Access"].waitForExistence(timeout: 3)
+        )
     }
 
     @MainActor
@@ -398,6 +408,91 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
+    func testMainInterfaceUsesFourFunctionalTabs() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        for identifier in [
+            "tab-review",
+            "tab-categories",
+            "tab-queue",
+            "tab-settings"
+        ] {
+            XCTAssertTrue(
+                app.buttons[identifier].waitForExistence(timeout: 3)
+            )
+        }
+
+        XCTAssertTrue(app.staticTexts["Review"].exists)
+        XCTAssertTrue(app.buttons["review-setup"].exists)
+        XCTAssertTrue(app.buttons["start-reviewing"].isHittable)
+        XCTAssertFalse(app.staticTexts["FlickPic"].exists)
+        XCTAssertFalse(
+            app.staticTexts["Keep what matters. Queue the rest."].exists
+        )
+
+        selectTab("tab-categories", in: app)
+        XCTAssertTrue(app.staticTexts["Media Types"].exists)
+        XCTAssertTrue(app.staticTexts["On-Device Categories"].exists)
+        XCTAssertTrue(app.buttons["categories-review-setup"].exists)
+
+        selectTab("tab-queue", in: app)
+        XCTAssertTrue(
+            app.staticTexts["Deletion Queue Is Empty"]
+                .waitForExistence(timeout: 3)
+        )
+
+        selectTab("tab-settings", in: app)
+        XCTAssertTrue(app.staticTexts["Photos Access"].exists)
+        XCTAssertFalse(app.buttons["Done"].exists)
+
+        selectTab("tab-review", in: app)
+        XCTAssertTrue(app.buttons["start-reviewing"].isHittable)
+    }
+
+    @MainActor
+    func testReviewSetupStaysSynchronizedAcrossTabs() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-skip-onboarding",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let reviewSetup = app.buttons["review-setup"]
+        XCTAssertTrue(reviewSetup.waitForExistence(timeout: 3))
+        reviewSetup.tap()
+
+        let mediaPicker = app.descendants(matching: .any)["media-filter"]
+        XCTAssertTrue(mediaPicker.waitForExistence(timeout: 3))
+        mediaPicker.tap()
+        app.buttons["Videos"].tap()
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(
+            app.buttons["review-setup"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["review-setup"].label.contains("Videos"))
+
+        selectTab("tab-categories", in: app)
+        let categorySetup = app.buttons["categories-review-setup"]
+        XCTAssertTrue(categorySetup.waitForExistence(timeout: 3))
+        XCTAssertTrue(categorySetup.label.contains("Videos"))
+        XCTAssertTrue(
+            app.buttons["category-metadata:videos"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.buttons["category-metadata:images"].exists)
+    }
+
+    @MainActor
     func testMetadataBucketsAppearBeforeVisionStarts() throws {
         let app = XCUIApplication()
         app.launchArguments += [
@@ -406,6 +501,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-fixtures"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         XCTAssertTrue(
             app.buttons["category-metadata:images"]
@@ -428,6 +524,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-fixtures"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         let gifs = app.buttons["category-metadata:gifs"]
         let screenshots = app.buttons["category-metadata:screenshots"]
@@ -457,6 +554,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-cloud-video-thumbnail"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         let videos = app.buttons["category-metadata:videos"]
         XCTAssertTrue(videos.waitForExistence(timeout: 3))
@@ -487,6 +585,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-fixtures"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         setVisionCategoryMinimumToOne(in: app)
 
@@ -514,6 +613,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-fixtures"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         let start = app.buttons["start-categorizing"]
         XCTAssertTrue(start.waitForExistence(timeout: 3))
@@ -548,6 +648,7 @@ final class FlickPicUITests: XCTestCase {
             "-ui-testing-delayed-dashboard-refresh"
         ]
         app.launch()
+        selectTab("tab-categories", in: app)
 
         let gifs = app.buttons["category-metadata:gifs"]
         XCTAssertTrue(gifs.waitForExistence(timeout: 3))
@@ -561,7 +662,7 @@ final class FlickPicUITests: XCTestCase {
         app.buttons["End Session"].firstMatch.tap()
 
         XCTAssertTrue(
-            app.staticTexts["Review by Category"].waitForExistence(timeout: 3)
+            app.staticTexts["Media Types"].waitForExistence(timeout: 3)
         )
         XCTAssertFalse(
             app.staticTexts
@@ -570,10 +671,10 @@ final class FlickPicUITests: XCTestCase {
                 .waitForExistence(timeout: 2)
         )
 
-        let pending = app.buttons["pending-deletions"]
-        XCTAssertTrue(pending.waitForExistence(timeout: 3))
-        XCTAssertTrue(pending.isHittable)
-        pending.tap()
+        let queueTab = app.buttons["tab-queue"]
+        XCTAssertTrue(queueTab.waitForExistence(timeout: 3))
+        XCTAssertEqual(queueTab.value as? String, "1 pending")
+        queueTab.tap()
 
         let confirmDeletion = app.buttons["Delete 1 Items"]
         XCTAssertTrue(confirmDeletion.waitForExistence(timeout: 3))
@@ -583,6 +684,7 @@ final class FlickPicUITests: XCTestCase {
             app.staticTexts["Deletion Queue Is Empty"]
                 .waitForExistence(timeout: 3)
         )
+        XCTAssertEqual(queueTab.value as? String, "Empty")
     }
 
     @MainActor
@@ -637,9 +739,7 @@ final class FlickPicUITests: XCTestCase {
     private func setVisionCategoryMinimumToOne(
         in app: XCUIApplication
     ) {
-        let settings = app.buttons["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 3))
-        settings.tap()
+        selectTab("tab-settings", in: app)
 
         let stepper = app.steppers["minimum-vision-category-size"]
         XCTAssertTrue(stepper.waitForExistence(timeout: 3))
@@ -650,6 +750,17 @@ final class FlickPicUITests: XCTestCase {
         for _ in 0..<4 {
             decrement.tap()
         }
-        app.buttons["Done"].tap()
+        selectTab("tab-categories", in: app)
+    }
+
+    @MainActor
+    private func selectTab(
+        _ accessibilityIdentifier: String,
+        in app: XCUIApplication
+    ) {
+        let tab = app.buttons[accessibilityIdentifier]
+        XCTAssertTrue(tab.waitForExistence(timeout: 3))
+        XCTAssertTrue(tab.isHittable)
+        tab.tap()
     }
 }

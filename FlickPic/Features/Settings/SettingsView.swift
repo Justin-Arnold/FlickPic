@@ -2,12 +2,12 @@ import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var preferences: [AppPreference]
 
     let photoLibrary: PhotoLibraryService
     let classificationCoordinator: ClassificationCoordinator
+    let onCategoryEligibilityChanged: () -> Void
 
     @State private var hapticsEnabled = true
     @State private var minimumVisionCategorySize =
@@ -153,12 +153,6 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
-            }
-        }
         .onAppear {
             hapticsEnabled = preference?.hapticsEnabled ?? true
             minimumVisionCategorySize =
@@ -172,6 +166,7 @@ struct SettingsView: View {
             Button("Reset", role: .destructive) {
                 do {
                     try ReviewRepository(modelContext: modelContext).resetReviewHistory()
+                    onCategoryEligibilityChanged()
                 } catch {
                     errorMessage = error.localizedDescription
                 }
