@@ -429,7 +429,16 @@ final class FlickPicUITests: XCTestCase {
         }
 
         XCTAssertTrue(app.staticTexts["Review"].exists)
-        XCTAssertTrue(app.buttons["review-setup"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["scope-filter"].exists
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["media-filter"].exists
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-order"].exists
+        )
+        XCTAssertFalse(app.buttons["review-setup"].exists)
         XCTAssertTrue(app.buttons["start-reviewing"].isHittable)
         XCTAssertFalse(app.staticTexts["FlickPic"].exists)
         XCTAssertFalse(
@@ -465,21 +474,11 @@ final class FlickPicUITests: XCTestCase {
         ]
         app.launch()
 
-        let reviewSetup = app.buttons["review-setup"]
-        XCTAssertTrue(reviewSetup.waitForExistence(timeout: 3))
-        reviewSetup.tap()
-
         let mediaPicker = app.descendants(matching: .any)["media-filter"]
         XCTAssertTrue(mediaPicker.waitForExistence(timeout: 3))
         mediaPicker.tap()
         app.buttons["Videos"].tap()
-        app.buttons["Save"].tap()
-
-        XCTAssertTrue(
-            app.buttons["review-setup"]
-                .waitForExistence(timeout: 3)
-        )
-        XCTAssertTrue(app.buttons["review-setup"].label.contains("Videos"))
+        XCTAssertTrue(mediaPicker.label.contains("Videos"))
 
         selectTab("tab-categories", in: app)
         let categorySetup = app.buttons["categories-review-setup"]

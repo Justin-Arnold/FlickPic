@@ -3,41 +3,53 @@ import SwiftUI
 struct ReviewHomeView: View {
     let authorizationState: AuthorizationState
     let configuration: ReviewConfiguration
-    let onEditSetup: () -> Void
+    let onChangeConfiguration: (ReviewConfiguration) -> Void
     let onStartReviewing: () -> Void
     let onRequestAuthorization: () -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                switch authorizationState {
-                case .full, .limited:
+        Group {
+            switch authorizationState {
+            case .full, .limited:
+                Form {
                     if authorizationState == .limited {
                         LimitedPhotosNotice()
                     }
-                    ReviewSetupButton(
-                        configuration: configuration,
-                        accessibilityIdentifier: "review-setup",
-                        action: onEditSetup
+
+                    ReviewConfigurationSections(
+                        configuration: Binding(
+                            get: { configuration },
+                            set: { newConfiguration in
+                                onChangeConfiguration(newConfiguration)
+                            }
+                        )
                     )
-                case .notDetermined:
+                }
+                .accessibilityIdentifier("review-configuration")
+
+            case .notDetermined:
+                ScrollView {
                     PermissionCard(
                         title: "Photos access is needed",
                         detail: "Choose which photos and videos FlickPic can help you review.",
                         buttonTitle: "Continue",
                         action: onRequestAuthorization
                     )
-                case .denied, .restricted:
+                    .padding()
+                }
+
+            case .denied, .restricted:
+                ScrollView {
                     PermissionCard(
                         title: "Photos access is off",
                         detail: "Enable read and write access in Settings to review your library.",
                         buttonTitle: "Open Settings",
                         action: onOpenSettings
                     )
+                    .padding()
                 }
             }
-            .padding()
         }
         .navigationTitle("Review")
         .safeAreaInset(edge: .bottom, spacing: 0) {

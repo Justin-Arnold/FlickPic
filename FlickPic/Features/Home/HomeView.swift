@@ -70,7 +70,7 @@ struct HomeView: View {
                     ReviewHomeView(
                         authorizationState: photoLibrary.authorizationState,
                         configuration: configuration,
-                        onEditSetup: { showingSetup = true },
+                        onChangeConfiguration: persistConfiguration,
                         onStartReviewing: {
                             launchSession(
                                 request: ReviewRequest(
@@ -155,7 +155,8 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showingSetup) {
             SessionSetupView(configuration: configuration) {
-                saveConfiguration($0)
+                persistConfiguration($0)
+                showingSetup = false
             }
         }
         .fullScreenCover(
@@ -203,15 +204,21 @@ struct HomeView: View {
         Task { _ = await photoLibrary.requestAuthorization() }
     }
 
-    private func saveConfiguration(_ newConfiguration: ReviewConfiguration) {
+    private func persistConfiguration(
+        _ newConfiguration: ReviewConfiguration
+    ) {
+        var normalizedConfiguration = newConfiguration
+        if normalizedConfiguration.scope == .unreviewed {
+            normalizedConfiguration.includeReviewed = false
+        }
+
         do {
             try ReviewRepository(modelContext: modelContext)
-                .saveConfiguration(newConfiguration)
+                .saveConfiguration(normalizedConfiguration)
             dashboardRefreshToken = UUID()
         } catch {
             errorMessage = error.localizedDescription
         }
-        showingSetup = false
     }
 
     private func startCategorization() {
