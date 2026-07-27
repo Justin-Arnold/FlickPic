@@ -18,6 +18,7 @@ struct MediaCardView: View {
     @State private var retryToken = UUID()
     @State private var isPlayingLivePhoto = false
     @State private var showingInspector = false
+    @State private var hasFullResolutionImage = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -149,7 +150,8 @@ struct MediaCardView: View {
                 asset: asset,
                 initialImage: image,
                 initialGIFAnimation: gifAnimation,
-                photoLibrary: photoLibrary
+                photoLibrary: photoLibrary,
+                loadsDetailedImage: !hasFullResolutionImage
             )
         }
         .accessibilityElement(children: .contain)
@@ -217,6 +219,7 @@ struct MediaCardView: View {
         gifAnimation = nil
         livePhoto = nil
         isPlayingLivePhoto = false
+        hasFullResolutionImage = false
 
         let scale = UIScreen.main.scale
         let requestedSize = CGSize(
@@ -248,13 +251,35 @@ struct MediaCardView: View {
                     gifAnimation = animation
                     image = animation.posterImage
                 }
-            } else if asset.isLivePhoto {
-                let loadedLivePhoto = try? await photoLibrary.livePhoto(
-                    identifier: asset.id,
-                    targetSize: requestedSize
-                )
-                guard !Task.isCancelled else { return }
-                livePhoto = loadedLivePhoto
+            } else {
+                if asset.isLivePhoto {
+                    let loadedLivePhoto = try? await photoLibrary.livePhoto(
+                        identifier: asset.id,
+                        targetSize: requestedSize
+                    )
+                    guard !Task.isCancelled else { return }
+                    livePhoto = loadedLivePhoto
+                }
+
+                if asset.mediaKind == .photo {
+                    do {
+                        let fullResolutionImage =
+                            try await photoLibrary.inspectionImage(
+                                identifier: asset.id,
+                                targetSize: ReviewCardImageSizing.targetSize(
+                                    for: asset
+                                )
+                            )
+                        try Task.checkCancellation()
+                        image = fullResolutionImage
+                        hasFullResolutionImage = true
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        // Keep the exact display-size image if the larger
+                        // source cannot currently be retrieved from Photos.
+                    }
+                }
             }
         } catch is CancellationError {
             return
@@ -280,6 +305,14 @@ struct MediaCardView: View {
 private struct MediaLoadRequest: Equatable {
     let assetIdentifier: String
     let retryToken: UUID
+}
+
+enum ReviewCardImageSizing {
+    static func targetSize(
+        for asset: MediaAssetDescriptor
+    ) -> CGSize {
+        InspectionImageSizing.targetSize(for: asset)
+    }
 }
 
 private struct LivePhotoPreviewGesture: ViewModifier {

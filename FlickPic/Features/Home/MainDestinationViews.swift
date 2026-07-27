@@ -317,6 +317,8 @@ struct ReviewSetupButton: View {
 }
 
 private struct CategoryBucketCard: View {
+    @Environment(\.displayScale) private var displayScale
+
     let bucket: CategoryBucket
     let photoLibrary: PhotoLibraryService
 
@@ -324,6 +326,11 @@ private struct CategoryBucketCard: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let targetSize = CategoryThumbnailSizing.targetSize(
+                renderedSize: geometry.size,
+                displayScale: displayScale
+            )
+
             ZStack(alignment: .bottomLeading) {
                 Group {
                     if let thumbnail {
@@ -369,17 +376,54 @@ private struct CategoryBucketCard: View {
                 height: geometry.size.height,
                 alignment: .bottomLeading
             )
+            .task(
+                id: CategoryThumbnailRequest(
+                    assetIdentifier: bucket.representativeAsset.id,
+                    pixelWidth: Int(targetSize.width),
+                    pixelHeight: Int(targetSize.height)
+                )
+            ) {
+                thumbnail = nil
+                thumbnail = try? await photoLibrary.thumbnail(
+                    identifier: bucket.representativeAsset.id,
+                    targetSize: targetSize
+                )
+            }
         }
         .frame(height: 126)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .contentShape(RoundedRectangle(cornerRadius: 16))
-        .task(id: bucket.representativeAsset.id) {
-            thumbnail = try? await photoLibrary.thumbnail(
-                identifier: bucket.representativeAsset.id,
-                targetSize: CGSize(width: 360, height: 260)
-            )
-        }
     }
+}
+
+enum CategoryThumbnailSizing {
+    static let minimumTargetSize = CGSize(width: 720, height: 504)
+
+    static func targetSize(
+        renderedSize: CGSize,
+        displayScale: CGFloat
+    ) -> CGSize {
+        CGSize(
+            width: ceil(
+                max(
+                    renderedSize.width * displayScale,
+                    minimumTargetSize.width
+                )
+            ),
+            height: ceil(
+                max(
+                    renderedSize.height * displayScale,
+                    minimumTargetSize.height
+                )
+            )
+        )
+    }
+}
+
+private struct CategoryThumbnailRequest: Equatable {
+    let assetIdentifier: String
+    let pixelWidth: Int
+    let pixelHeight: Int
 }
 
 private struct LimitedPhotosNotice: View {

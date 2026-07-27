@@ -559,6 +559,43 @@ struct InspectionImageSizingTests {
 }
 
 @MainActor
+struct ReviewImageSizingTests {
+    @Test
+    func reviewCardRequestsTheAvailableSourceResolution() {
+        let asset = MediaAssetDescriptor.fixture(
+            id: "review-card",
+            pixelWidth: 4_032,
+            pixelHeight: 3_024
+        )
+
+        #expect(
+            ReviewCardImageSizing.targetSize(for: asset)
+                == CGSize(width: 4_032, height: 3_024)
+        )
+    }
+
+    @Test
+    func categoryTilesRequestAtLeastTheHighQualityFloor() {
+        let target = CategoryThumbnailSizing.targetSize(
+            renderedSize: CGSize(width: 180, height: 126),
+            displayScale: 3
+        )
+
+        #expect(target == CGSize(width: 720, height: 504))
+    }
+
+    @Test
+    func categoryTilesScaleUpForLargerRenderedSizes() {
+        let target = CategoryThumbnailSizing.targetSize(
+            renderedSize: CGSize(width: 400, height: 180),
+            displayScale: 2
+        )
+
+        #expect(target == CGSize(width: 800, height: 504))
+    }
+}
+
+@MainActor
 struct GIFAnimationTests {
     @Test
     func decodesFrameTimingAndDownsamplesForPlayback() async throws {

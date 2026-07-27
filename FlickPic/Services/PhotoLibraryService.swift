@@ -47,6 +47,7 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
                 from: PHPhotoLibrary.authorizationStatus(for: .readWrite)
             ))
         super.init()
+        imageCache.totalCostLimit = 96 * 1_024 * 1_024
         gifDataCache.totalCostLimit = 64 * 1_024 * 1_024
         cleanTemporaryExports()
         if authorizationState.canReadLibrary && !usesUITestAuthorizationOverride {
@@ -137,8 +138,8 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
 
         let asset = try asset(identifier: identifier)
         let options = PHImageRequestOptions()
-        options.deliveryMode = .fastFormat
-        options.resizeMode = .fast
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = true
 
         let cancellation = PhotoRequestCancellation()
@@ -150,6 +151,9 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
                     contentMode: .aspectFit,
                     options: options
                 ) { image, info in
+                    if (info?[PHImageResultIsDegradedKey] as? Bool) == true {
+                        return
+                    }
                     guard cancellation.claimCompletion() else { return }
                     if let error = info?[PHImageErrorKey] as? Error {
                         continuation.resume(
@@ -178,7 +182,10 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
             }
         }
 
-        imageCache.setObject(image, forKey: cacheKey)
+        let imageCost = image.cgImage.map {
+            $0.bytesPerRow * $0.height
+        } ?? 0
+        imageCache.setObject(image, forKey: cacheKey, cost: imageCost)
         return image
     }
 
@@ -584,8 +591,8 @@ final class PhotoLibraryService: NSObject, PhotoLibraryClient {
         cachedAssets = assets
 
         let options = PHImageRequestOptions()
-        options.deliveryMode = .fastFormat
-        options.resizeMode = .fast
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = true
         imageManager.startCachingImages(
             for: assets,
