@@ -106,6 +106,45 @@ struct ReviewTutorialTests {
             ) == nil
         )
     }
+
+    @Test
+    func tutorialStepsIgnoreMovementOutsideTheirTaughtDirection() {
+        #expect(
+            ReviewTutorialStep.queueDelete.constrainedOffset(
+                for: CGSize(width: 80, height: -40)
+            ) == .zero
+        )
+        #expect(
+            ReviewTutorialStep.queueDelete.constrainedOffset(
+                for: CGSize(width: -80, height: -40)
+            ) == CGSize(width: -80, height: 0)
+        )
+        #expect(
+            ReviewTutorialStep.keep.constrainedOffset(
+                for: CGSize(width: -80, height: -40)
+            ) == .zero
+        )
+        #expect(
+            ReviewTutorialStep.keep.constrainedOffset(
+                for: CGSize(width: 80, height: -40)
+            ) == CGSize(width: 80, height: 0)
+        )
+        #expect(
+            ReviewTutorialStep.rescue.constrainedOffset(
+                for: CGSize(width: 80, height: 40)
+            ) == .zero
+        )
+        #expect(
+            ReviewTutorialStep.rescue.constrainedOffset(
+                for: CGSize(width: 80, height: -40)
+            ) == CGSize(width: 0, height: -40)
+        )
+        #expect(
+            ReviewTutorialStep.inspect.constrainedOffset(
+                for: CGSize(width: 80, height: -40)
+            ) == .zero
+        )
+    }
 }
 
 @MainActor

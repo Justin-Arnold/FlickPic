@@ -13,7 +13,10 @@ struct OnboardingView: View {
     var body: some View {
         ZStack {
             if isShowingWalkthrough {
-                GestureWalkthroughView(onFinish: requestAccess)
+                GestureWalkthroughView(
+                    photoLibrary: photoLibrary,
+                    onFinish: requestAccess
+                )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
                 privacyIntroduction

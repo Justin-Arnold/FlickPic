@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum ReviewTutorialInteraction: Equatable {
     case drag(ReviewCardGestureAction)
@@ -79,11 +80,26 @@ enum ReviewTutorialStep: String, CaseIterable, Identifiable {
         case .inspect: .zero
         }
     }
+
+    func constrainedOffset(for translation: CGSize) -> CGSize {
+        switch interaction {
+        case .drag(.queueDelete):
+            CGSize(width: min(translation.width, 0), height: 0)
+        case .drag(.keep):
+            CGSize(width: max(translation.width, 0), height: 0)
+        case .drag(.rescue):
+            CGSize(width: 0, height: min(translation.height, 0))
+        case .doubleTap:
+            .zero
+        }
+    }
 }
 
 struct GestureWalkthroughView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    let photoLibrary: any PhotoLibraryClient
     let onFinish: () -> Void
 
     @State private var stepIndex = 0
@@ -123,64 +139,56 @@ struct GestureWalkthroughView: View {
             )
 
             GeometryReader { geometry in
+                let usesAccessibilityLayout =
+                    dynamicTypeSize.isAccessibilitySize
+                let cardHeight = min(
+                    max(
+                        geometry.size.height
+                            * (usesAccessibilityLayout ? 0.28 : 0.42),
+                        usesAccessibilityLayout ? 140 : 220
+                    ),
+                    usesAccessibilityLayout ? 240 : 390
+                )
+
                 VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            header
-                            progress
-                            coachMark
-                                .id(step.id)
+                    coachMark
+                        .id(step.id)
 
-                            tutorialCard
-                                .frame(maxWidth: .infinity)
-                                .frame(
-                                    height: min(
-                                        max(geometry.size.height * 0.4, 240),
-                                        390
-                                    )
-                                )
+                    tutorialCard
+                        .frame(maxWidth: .infinity)
+                        .frame(height: cardHeight)
+                        .padding(.top, usesAccessibilityLayout ? 8 : 14)
 
-                            TutorialGestureCue(step: step)
-                                .id(step.id)
-                        }
-                        .padding(.horizontal, 22)
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
-                        .frame(
-                            minHeight: max(geometry.size.height - 76, 0),
-                            alignment: .top
-                        )
+                    progress
+                        .padding(.top, usesAccessibilityLayout ? 8 : 14)
+
+                    if !usesAccessibilityLayout {
+                        TutorialGestureCue(step: step)
+                            .id(step.id)
+                            .padding(.top, 12)
                     }
-                    .scrollBounceBehavior(.basedOnSize)
+
+                    Spacer(minLength: usesAccessibilityLayout ? 4 : 8)
 
                     nextButton
-                        .padding(.horizontal, 22)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
-                        .background(.black.opacity(0.92))
+                        .padding(.top, usesAccessibilityLayout ? 4 : 8)
                 }
+                .padding(.horizontal, 22)
+                .padding(.top, usesAccessibilityLayout ? 6 : 10)
+                .padding(.bottom, usesAccessibilityLayout ? 8 : 12)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
         }
         .foregroundStyle(.white)
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("A quick tour")
-                    .font(.headline)
-                Text("Practice on this sample—nothing is saved.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
-            }
-
-            Spacer()
-
-            Button("Skip to Photos Access", action: onFinish)
-                .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("onboarding-skip")
+        .fullScreenCover(isPresented: $isInspecting) {
+            ImageInspectorView(
+                asset: TutorialSampleImage.asset,
+                initialImage: TutorialSampleImage.image,
+                initialGIFAnimation: nil,
+                photoLibrary: photoLibrary,
+                loadsDetailedImage: false
+            )
+            .dynamicTypeSize(dynamicTypeSize)
         }
     }
 
@@ -242,7 +250,7 @@ struct GestureWalkthroughView: View {
 
     private var tutorialCard: some View {
         TutorialSampleCard(
-            isInspecting: isInspecting
+            image: TutorialSampleImage.image
         )
         .overlay {
             tutorialDecisionOverlay
@@ -311,12 +319,9 @@ struct GestureWalkthroughView: View {
         DragGesture(minimumDistance: ReviewCardGesturePolicy.minimumDistance)
             .onChanged { value in
                 guard !isCompletingStep else { return }
-                if let constrainedOffset =
-                    ReviewCardGesturePolicy.constrainedOffset(
-                        for: value.translation
-                    ) {
-                    cardOffset = constrainedOffset
-                }
+                cardOffset = step.constrainedOffset(
+                    for: value.translation
+                )
             }
             .onEnded { _ in
                 guard !isCompletingStep else { return }
@@ -381,23 +386,12 @@ struct GestureWalkthroughView: View {
     }
 
     private func completeInspectionStep() {
-        isCompletingStep = true
-        if reduceMotion {
-            isInspecting = true
-            isCompletingStep = false
-            return
-        }
-
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.76)) {
-            isInspecting = true
-        } completion: {
-            isCompletingStep = false
-        }
+        isInspecting = true
     }
 
     private func completeStepWithoutGesture() {
-        if isLastStep {
-            onFinish()
+        if step == .inspect {
+            completeInspectionStep()
         } else {
             advance()
         }
@@ -427,45 +421,126 @@ struct GestureWalkthroughView: View {
     }
 }
 
+@MainActor
+private enum TutorialSampleImage {
+    static let asset = MediaAssetDescriptor(
+        id: "onboarding-sample",
+        mediaKind: .photo,
+        creationDate: nil,
+        modificationDate: nil,
+        pixelWidth: 1_200,
+        pixelHeight: 1_600,
+        duration: 0,
+        isFavorite: false,
+        isScreenshot: false,
+        isLivePhoto: false
+    )
+
+    static let image: UIImage = {
+        let size = CGSize(width: 1_200, height: 1_600)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+
+        return UIGraphicsImageRenderer(
+            size: size,
+            format: format
+        ).image { rendererContext in
+            let context = rendererContext.cgContext
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let sky = CGGradient(
+                colorsSpace: colorSpace,
+                colors: [
+                    UIColor(
+                        red: 0.19,
+                        green: 0.48,
+                        blue: 0.78,
+                        alpha: 1
+                    ).cgColor,
+                    UIColor(
+                        red: 0.93,
+                        green: 0.54,
+                        blue: 0.46,
+                        alpha: 1
+                    ).cgColor
+                ] as CFArray,
+                locations: [0, 1]
+            )
+            if let sky {
+                context.drawLinearGradient(
+                    sky,
+                    start: .zero,
+                    end: CGPoint(x: 0, y: size.height),
+                    options: []
+                )
+            }
+
+            UIColor(
+                red: 1,
+                green: 0.82,
+                blue: 0.24,
+                alpha: 0.94
+            ).setFill()
+            UIBezierPath(
+                ovalIn: CGRect(
+                    x: 790,
+                    y: 190,
+                    width: 230,
+                    height: 230
+                )
+            ).fill()
+
+            let distantMountain = UIBezierPath()
+            distantMountain.move(to: CGPoint(x: -120, y: 1_180))
+            distantMountain.addLine(to: CGPoint(x: 390, y: 560))
+            distantMountain.addLine(to: CGPoint(x: 760, y: 1_100))
+            distantMountain.addLine(to: CGPoint(x: 1_020, y: 720))
+            distantMountain.addLine(to: CGPoint(x: 1_360, y: 1_170))
+            distantMountain.addLine(to: CGPoint(x: 1_360, y: 1_700))
+            distantMountain.addLine(to: CGPoint(x: -120, y: 1_700))
+            distantMountain.close()
+            UIColor(
+                red: 0.20,
+                green: 0.39,
+                blue: 0.35,
+                alpha: 1
+            ).setFill()
+            distantMountain.fill()
+
+            let foregroundMountain = UIBezierPath()
+            foregroundMountain.move(to: CGPoint(x: -180, y: 1_420))
+            foregroundMountain.addLine(to: CGPoint(x: 360, y: 830))
+            foregroundMountain.addLine(to: CGPoint(x: 650, y: 1_130))
+            foregroundMountain.addLine(to: CGPoint(x: 900, y: 900))
+            foregroundMountain.addLine(to: CGPoint(x: 1_390, y: 1_460))
+            foregroundMountain.addLine(to: CGPoint(x: 1_390, y: 1_700))
+            foregroundMountain.addLine(to: CGPoint(x: -180, y: 1_700))
+            foregroundMountain.close()
+            UIColor(
+                red: 0.08,
+                green: 0.20,
+                blue: 0.25,
+                alpha: 1
+            ).setFill()
+            foregroundMountain.fill()
+        }
+    }()
+}
+
 private struct TutorialSampleCard: View {
-    let isInspecting: Bool
+    let image: UIImage
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.19, green: 0.48, blue: 0.78),
-                        Color(red: 0.93, green: 0.54, blue: 0.46)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                Circle()
-                    .fill(.yellow.opacity(0.9))
-                    .frame(
-                        width: geometry.size.width * 0.25,
-                        height: geometry.size.width * 0.25
-                    )
-                    .blur(radius: 2)
-                    .position(
-                        x: geometry.size.width * 0.76,
-                        y: geometry.size.height * 0.2
-                    )
-
-                Image(systemName: "mountain.2.fill")
+                Image(uiImage: image)
                     .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(
-                        Color(red: 0.08, green: 0.2, blue: 0.25),
-                        Color(red: 0.2, green: 0.39, blue: 0.35)
+                    .scaledToFill()
+                    .frame(
+                        width: geometry.size.width,
+                        height: geometry.size.height
                     )
-                    .frame(width: geometry.size.width * 1.15)
-                    .position(
-                        x: geometry.size.width * 0.5,
-                        y: geometry.size.height * 0.67
-                    )
+                    .clipped()
 
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.62)],
@@ -497,24 +572,11 @@ private struct TutorialSampleCard: View {
                     }
                 }
                 .padding(16)
-
-                if isInspecting {
-                    ZStack {
-                        Rectangle()
-                            .fill(.black.opacity(0.34))
-                        VStack(spacing: 12) {
-                            Image(systemName: "viewfinder")
-                                .font(.system(size: 56, weight: .light))
-                            Text("Inspection mode")
-                                .font(.headline)
-                            Text("Pinch and pan for a closer look")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.75))
-                        }
-                    }
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                }
             }
+            .frame(
+                width: geometry.size.width,
+                height: geometry.size.height
+            )
         }
         .background(Color(white: 0.08))
         .overlay {
@@ -523,10 +585,10 @@ private struct TutorialSampleCard: View {
         }
         .shadow(
             color: .black.opacity(0.35),
-            radius: isInspecting ? 24 : 12,
+            radius: 12,
             y: 8
         )
-        .scaleEffect(isInspecting ? 1.025 : 1)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityHidden(true)
     }
 }

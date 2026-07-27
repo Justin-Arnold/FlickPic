@@ -8,6 +8,7 @@ struct ImageInspectorView: View {
     let initialImage: UIImage?
     let initialGIFAnimation: GIFAnimation?
     let photoLibrary: any PhotoLibraryClient
+    let loadsDetailedImage: Bool
 
     @State private var detailedImage: UIImage?
     @State private var detailedGIFAnimation: GIFAnimation?
@@ -15,6 +16,20 @@ struct ImageInspectorView: View {
     @State private var errorMessage: String?
     @State private var retryToken = UUID()
     @State private var zoomController = ImageZoomController()
+
+    init(
+        asset: MediaAssetDescriptor,
+        initialImage: UIImage?,
+        initialGIFAnimation: GIFAnimation?,
+        photoLibrary: any PhotoLibraryClient,
+        loadsDetailedImage: Bool = true
+    ) {
+        self.asset = asset
+        self.initialImage = initialImage
+        self.initialGIFAnimation = initialGIFAnimation
+        self.photoLibrary = photoLibrary
+        self.loadsDetailedImage = loadsDetailedImage
+    }
 
     private var displayedImage: UIImage? {
         if detailedGIFAnimation != nil {
@@ -152,6 +167,11 @@ struct ImageInspectorView: View {
         isLoading = true
         errorMessage = nil
         detailedGIFAnimation = nil
+
+        guard loadsDetailedImage else {
+            isLoading = false
+            return
+        }
 
         // The card already decoded this animation at screen scale. Reuse those
         // frames so opening the inspector does not double the GIF memory cost.

@@ -208,6 +208,15 @@ final class FlickPicUITests: XCTestCase {
                 .waitForExistence(timeout: 3)
         )
         XCTAssertTrue(card.waitForExistence(timeout: 3))
+        let progress = app.descendants(matching: .any)[
+            "onboarding-progress"
+        ]
+        XCTAssertTrue(progress.exists)
+        XCTAssertGreaterThan(card.frame.minY, app.descendants(matching: .any)[
+            "onboarding-step-queue-delete"
+        ].frame.maxY)
+        XCTAssertGreaterThan(progress.frame.minY, card.frame.maxY)
+        XCTAssertEqual(app.scrollViews.count, 0)
         card.swipeLeft()
 
         XCTAssertTrue(
@@ -228,6 +237,13 @@ final class FlickPicUITests: XCTestCase {
         )
         card.doubleTap()
 
+        let inspector = app.descendants(matching: .any)["image-inspector"]
+        XCTAssertTrue(inspector.waitForExistence(timeout: 3))
+        let closeInspector = app.buttons["Close detail"]
+        XCTAssertTrue(closeInspector.waitForExistence(timeout: 3))
+        closeInspector.tap()
+        XCTAssertTrue(inspector.waitForNonExistence(timeout: 3))
+
         let continueToPhotos = app.buttons["onboarding-continue"]
         XCTAssertTrue(continueToPhotos.waitForExistence(timeout: 3))
         continueToPhotos.tap()
@@ -238,7 +254,7 @@ final class FlickPicUITests: XCTestCase {
     }
 
     @MainActor
-    func testOnboardingGestureTourCanBeSkipped() throws {
+    func testOnboardingGestureTourOnlyAcceptsTheTaughtDirection() throws {
         let app = XCUIApplication()
         app.launchArguments += [
             "-ui-testing",
@@ -250,12 +266,57 @@ final class FlickPicUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 3))
         start.tap()
 
-        let skip = app.buttons["onboarding-skip"]
-        XCTAssertTrue(skip.waitForExistence(timeout: 3))
-        skip.tap()
+        XCTAssertFalse(app.staticTexts["A quick tour"].exists)
+        XCTAssertFalse(
+            app.staticTexts[
+                "Practice on this sample—nothing is saved."
+            ].exists
+        )
+        XCTAssertFalse(app.buttons["onboarding-skip"].exists)
+        XCTAssertEqual(app.scrollViews.count, 0)
+
+        let card = app.descendants(matching: .any)["onboarding-demo-card"]
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-queue-delete"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(card.waitForExistence(timeout: 3))
+        card.swipeRight()
+        XCTAssertFalse(
+            app.descendants(matching: .any)["onboarding-step-keep"]
+                .waitForExistence(timeout: 0.5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-queue-delete"]
+                .exists
+        )
+        card.swipeLeft()
 
         XCTAssertTrue(
-            app.buttons["start-reviewing"].waitForExistence(timeout: 3)
+            app.descendants(matching: .any)["onboarding-step-keep"]
+                .waitForExistence(timeout: 3)
+        )
+        card.swipeLeft()
+        XCTAssertFalse(
+            app.descendants(matching: .any)["onboarding-step-rescue"]
+                .waitForExistence(timeout: 0.5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-keep"].exists
+        )
+        card.swipeRight()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-rescue"]
+                .waitForExistence(timeout: 3)
+        )
+        card.swipeDown()
+        XCTAssertFalse(
+            app.descendants(matching: .any)["onboarding-step-inspect"]
+                .waitForExistence(timeout: 0.5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding-step-rescue"].exists
         )
     }
 
@@ -298,6 +359,42 @@ final class FlickPicUITests: XCTestCase {
         XCTAssertTrue(
             app.buttons["start-reviewing"].waitForExistence(timeout: 3)
         )
+    }
+
+    @MainActor
+    func testOnboardingGestureTourFitsAccessibilityTextWithoutScrolling() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        let start = app.buttons["onboarding-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+
+        let coachMark = app.descendants(matching: .any)[
+            "onboarding-step-queue-delete"
+        ]
+        let card = app.descendants(matching: .any)["onboarding-demo-card"]
+        let progress = app.descendants(matching: .any)[
+            "onboarding-progress"
+        ]
+        let next = app.buttons["onboarding-next"]
+        let viewport = app.windows.firstMatch.frame
+
+        for element in [coachMark, card, progress, next] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3))
+            XCTAssertGreaterThanOrEqual(element.frame.minY, viewport.minY)
+            XCTAssertLessThanOrEqual(element.frame.maxY, viewport.maxY)
+        }
+        XCTAssertGreaterThan(card.frame.minY, coachMark.frame.maxY)
+        XCTAssertGreaterThan(progress.frame.minY, card.frame.maxY)
+        XCTAssertGreaterThan(next.frame.minY, progress.frame.maxY)
+        XCTAssertTrue(next.isHittable)
+        XCTAssertEqual(app.scrollViews.count, 0)
     }
 
     @MainActor
