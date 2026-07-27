@@ -34,6 +34,47 @@ final class FlickPicUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Private categorization"].exists)
         XCTAssertTrue(app.staticTexts["No account or tracking"].exists)
         XCTAssertTrue(app.buttons["See How It Works"].exists)
+        XCTAssertTrue(app.buttons["Skip Tour"].exists)
+
+        let viewport = app.windows.firstMatch.frame
+        let privacyNote = app.descendants(matching: .any)[
+            "onboarding-privacy-note"
+        ]
+        let skipTour = app.buttons["onboarding-skip-tour"]
+        let seeHowItWorks = app.buttons["onboarding-start"]
+        let initialContent = [
+            app.staticTexts["A calmer camera roll"],
+            app.staticTexts["On your device"],
+            app.staticTexts["Media, history, and categories stay local."],
+            app.staticTexts["Deletion stays deliberate"],
+            app.staticTexts[
+                "Nothing is deleted until you confirm the queue."
+            ],
+            app.staticTexts["Private categorization"],
+            app.staticTexts[
+                "Optional Apple Vision categorization stays on-device."
+            ],
+            app.staticTexts["No account or tracking"],
+            app.staticTexts[
+                "No backend, analytics, ads, or subscription."
+            ],
+            privacyNote,
+            skipTour,
+            seeHowItWorks
+        ]
+        for element in initialContent {
+            XCTAssertTrue(element.exists)
+            XCTAssertGreaterThanOrEqual(element.frame.minY, viewport.minY)
+            XCTAssertLessThanOrEqual(element.frame.maxY, viewport.maxY)
+        }
+        XCTAssertLessThan(
+            min(skipTour.frame.minY, seeHowItWorks.frame.minY)
+                - privacyNote.frame.maxY,
+            viewport.height * 0.24,
+            "The introduction should distribute space instead of leaving a large empty lower region."
+        )
+        XCTAssertTrue(skipTour.isHittable)
+        XCTAssertTrue(seeHowItWorks.isHittable)
         XCTAssertEqual(
             app.alerts.count,
             0,
@@ -49,6 +90,102 @@ final class FlickPicUITests: XCTestCase {
             app.alerts.count,
             0,
             "Opening the tour must not request Photos access."
+        )
+    }
+
+    @MainActor
+    func testOnboardingCanSkipTourAndEnterTheApp() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-ui-testing-fixtures"
+        ]
+        app.launch()
+
+        let skip = app.buttons["onboarding-skip-tour"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 3))
+        XCTAssertTrue(skip.isHittable)
+        skip.tap()
+
+        XCTAssertTrue(
+            app.buttons["start-reviewing"].waitForExistence(timeout: 3)
+        )
+    }
+
+    @MainActor
+    func testOnboardingSkipCompletesAfterAuthorizationIsDenied() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-ui-testing-fixtures",
+            "-ui-testing-denied-authorization"
+        ]
+        app.launch()
+
+        let skip = app.buttons["onboarding-skip-tour"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 3))
+        skip.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Photos access is off"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.buttons["onboarding-start"].exists)
+    }
+
+    @MainActor
+    func testOnboardingRemainsReachableWithAccessibilityText() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ui-testing",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.staticTexts["A calmer camera roll"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["onboarding-skip-tour"].isHittable)
+        XCTAssertTrue(app.buttons["onboarding-start"].isHittable)
+
+        let finalPromise = app.staticTexts[
+            "No backend, analytics, ads, or subscription."
+        ]
+        XCTAssertTrue(finalPromise.waitForExistence(timeout: 3))
+
+        let viewport = app.windows.firstMatch.frame
+        let contentBottom = min(
+            app.buttons["onboarding-skip-tour"].frame.minY,
+            app.buttons["onboarding-start"].frame.minY
+        )
+        func isFullyVisible() -> Bool {
+            finalPromise.frame.minY >= viewport.minY
+                && finalPromise.frame.maxY <= contentBottom
+        }
+
+        let start = app.coordinate(
+            withNormalizedOffset: CGVector(
+                dx: 0.5,
+                dy: max(
+                    min(contentBottom / viewport.height - 0.03, 0.8),
+                    0.2
+                )
+            )
+        )
+        let end = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)
+        )
+        for _ in 0..<6 where !isFullyVisible() {
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertTrue(
+            isFullyVisible(),
+            """
+            Final promise frame \(finalPromise.frame) did not fit between \
+            \(viewport.minY) and \(contentBottom).
+            """
         )
     }
 

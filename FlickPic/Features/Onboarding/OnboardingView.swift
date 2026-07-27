@@ -5,6 +5,7 @@ struct OnboardingView: View {
     let onComplete: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var isShowingWalkthrough = false
     @State private var isRequestingAccess = false
@@ -49,42 +50,53 @@ struct OnboardingView: View {
             .ignoresSafeArea()
 
             GeometryReader { geometry in
-                ScrollView {
-                    VStack(spacing: 28) {
-                        Spacer()
+                let usesExpandedLayout =
+                    geometry.size.height >= 700
+                    && !dynamicTypeSize.isAccessibilitySize
+                let verticalPadding: CGFloat =
+                    usesExpandedLayout ? 28 : 18
 
+                ScrollView {
+                    VStack(spacing: 0) {
                         Image(systemName: "photo.stack")
-                            .font(.system(size: 58, weight: .medium))
+                            .font(
+                                .system(
+                                    size: usesExpandedLayout ? 56 : 46,
+                                    weight: .medium
+                                )
+                            )
                             .foregroundStyle(.indigo)
                             .accessibilityHidden(true)
 
-                        VStack(spacing: 12) {
-                            Text("A calmer camera roll")
-                                .font(.largeTitle.bold())
-                                .multilineTextAlignment(.center)
+                        Text("A calmer camera roll")
+                            .font(.largeTitle.bold())
+                            .multilineTextAlignment(.center)
+                            .padding(.top, usesExpandedLayout ? 18 : 12)
 
-                            Text("Review your library one item at a time. Nothing is deleted until you inspect and confirm the queue.")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        adaptiveSpacer(
+                            usesExpandedLayout: usesExpandedLayout,
+                            compactLength: 24,
+                            expandedMinimum: 32
+                        )
 
-                        VStack(alignment: .leading, spacing: 18) {
+                        VStack(
+                            alignment: .leading,
+                            spacing: usesExpandedLayout ? 22 : 12
+                        ) {
                             PrivacyPromiseRow(
                                 icon: "iphone",
                                 title: "On your device",
-                                detail: "Your media, review history, and image categories stay local."
+                                detail: "Media, history, and categories stay local."
                             )
                             PrivacyPromiseRow(
                                 icon: "checkmark.shield",
                                 title: "Deletion stays deliberate",
-                                detail: "A swipe only adds an item to your review queue."
+                                detail: "Nothing is deleted until you confirm the queue."
                             )
                             PrivacyPromiseRow(
                                 icon: "sparkles.rectangle.stack",
                                 title: "Private categorization",
-                                detail: "If you choose, Apple Vision discovers image categories entirely on this iPhone."
+                                detail: "Optional Apple Vision categorization stays on-device."
                             )
                             PrivacyPromiseRow(
                                 icon: "person.crop.circle.badge.xmark",
@@ -92,34 +104,88 @@ struct OnboardingView: View {
                                 detail: "No backend, analytics, ads, or subscription."
                             )
                         }
-                        .padding(.vertical, 12)
 
-                        Spacer()
+                        adaptiveSpacer(
+                            usesExpandedLayout: usesExpandedLayout,
+                            compactLength: 20,
+                            expandedMinimum: 28
+                        )
 
-                        Button {
-                            isShowingWalkthrough = true
-                        } label: {
-                            Text("See How It Works")
-                                .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
+                        Text(
+                            "The tour uses a sample photo. Photos access is requested only when you continue."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 520)
+                        .accessibilityIdentifier("onboarding-privacy-note")
+
+                        if usesExpandedLayout {
+                            Spacer(minLength: 28)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .accessibilityIdentifier("onboarding-start")
-
-                        Text("The quick tour uses a sample card and never touches your library. FlickPic asks for read and write access only after the tour.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(24)
-                    .frame(minHeight: geometry.size.height)
+                    .frame(
+                        minHeight: max(
+                            0,
+                            geometry.size.height - (verticalPadding * 2)
+                        )
+                    )
+                    .padding(.horizontal, usesExpandedLayout ? 28 : 20)
+                    .padding(.vertical, verticalPadding)
                 }
                 .scrollBounceBehavior(.basedOnSize)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            introductionActions
+        }
+    }
+
+    @ViewBuilder
+    private func adaptiveSpacer(
+        usesExpandedLayout: Bool,
+        compactLength: CGFloat,
+        expandedMinimum: CGFloat
+    ) -> some View {
+        if usesExpandedLayout {
+            Spacer(minLength: expandedMinimum)
+        } else {
+            Color.clear
+                .frame(height: compactLength)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var introductionActions: some View {
+        VStack {
+            HStack(spacing: 10) {
+                Button(action: requestAccess) {
+                    Text("Skip Tour")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("onboarding-skip-tour")
+
+                Button {
+                    isShowingWalkthrough = true
+                } label: {
+                    Text("See How It Works")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("onboarding-start")
+            }
+            .controlSize(.large)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .disabled(isRequestingAccess)
     }
 
     private func requestAccess() {
@@ -135,15 +201,15 @@ struct OnboardingView: View {
 
 private struct PrivacyPromiseRow: View {
     let icon: String
-    let title: String
-    let detail: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(.title3)
                 .foregroundStyle(.indigo)
-                .frame(width: 28)
+                .frame(width: 26)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {

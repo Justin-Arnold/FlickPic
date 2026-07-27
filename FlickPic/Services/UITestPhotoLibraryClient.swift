@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class UITestPhotoLibraryClient: PhotoLibraryClient {
-    let authorizationState: AuthorizationState = .full
+    let authorizationState: AuthorizationState
 
     private var fetchAssetsCallCount = 0
     private var assets: [MediaAssetDescriptor] = [
@@ -51,6 +51,16 @@ final class UITestPhotoLibraryClient: PhotoLibraryClient {
             isLivePhoto: false
         )
     ]
+
+    init() {
+        if ProcessInfo.processInfo.arguments.contains(
+            "-ui-testing-denied-authorization"
+        ) {
+            authorizationState = .denied
+        } else {
+            authorizationState = .full
+        }
+    }
 
     func requestAuthorization() async -> AuthorizationState {
         authorizationState
